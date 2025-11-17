@@ -27,6 +27,16 @@ from video_capture import VideoCapture, AsyncDeviceScanner
 from pose_detection import PoseDetector, PositionSmoother
 from pid_controller import AdaptivePIDController
 from arduino_controller import ArduinoController, AsyncArduinoScanner
+from face_centering import (
+    EventLogger,
+    MediaPipeFaceDetectorAdapter,
+    CoordinateMapper,
+    SmoothingPipeline,
+    MovementController,
+    PerformanceMonitor,
+    FaceCenteringPipeline,
+)
+from gui.pid_tab import PIDTabView
 
 # Configure appearance
 ctk.set_appearance_mode("dark")
@@ -70,6 +80,22 @@ class HumanTrackingApp(ctk.CTk):
         # Set callbacks
         self.arduino.set_feedback_callback(self.on_arduino_feedback)
         self.arduino.set_error_callback(self.on_arduino_error)
+
+        # New modular face-centering pipeline (SRP/DRY)
+        self.fc_logger = EventLogger(ui_logger=self.log)
+        self.fc_detector = MediaPipeFaceDetectorAdapter(self.pose_detector, self.config)
+        self.fc_smoother = SmoothingPipeline(self.position_smoother, self.config)
+        self.fc_mapper = CoordinateMapper(self.config)
+        self.fc_mover = MovementController(self.pid_controller, self.arduino, self.config)
+        self.fc_perf = PerformanceMonitor(history_len=int(self.config.get('gui', 'plot_history_length') or 100))
+        self.face_pipeline = FaceCenteringPipeline(
+            detector=self.fc_detector,
+            smoother=self.fc_smoother,
+            mapper=self.fc_mapper,
+            mover=self.fc_mover,
+            perf_monitor=self.fc_perf,
+            logger=self.fc_logger,
+        )
         
         # Control flags
         self.tracking_enabled = False
@@ -248,137 +274,17 @@ class HumanTrackingApp(ctk.CTk):
         self.scan_arduino_devices()
     
     def setup_pid_tab(self):
-        """Setup PID control settings tab"""
-        # PID Gains
-        gains_frame = ctk.CTkFrame(self.pid_tab)
-        gains_frame.pack(fill="x", padx=10, pady=10)
-        
-        ctk.CTkLabel(gains_frame, text="PID Gains", font=("Arial", 14, "bold")).pack()
-        
-        # P Gain
-        p_frame = ctk.CTkFrame(gains_frame)
-        p_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(p_frame, text="P:", width=30).pack(side="left", padx=5)
-        self.p_slider = ctk.CTkSlider(
-            p_frame, from_=0, to=10, number_of_steps=100,
-            command=self.on_pid_change
+        """Setup PID control tab using modular PIDTabView"""
+        self.pid_ui = PIDTabView(
+            parent=self.pid_tab,
+            config=self.config,
+            on_pid_change=self.on_pid_change,
+            on_apply_motor_settings=self.apply_motor_settings,
+            on_deadband_change=self.on_deadband_change,
+            on_min_interval_change=self.on_min_interval_change,
+            on_invert_direction_change=self.on_invert_direction_change,
+            on_toggle_adaptive_pid=self.toggle_adaptive_pid,
         )
-        self.p_slider.set(self.config.get('pid', 'kp'))
-        self.p_slider.pack(side="left", fill="x", expand=True, padx=5)
-        self.p_value = ctk.CTkLabel(p_frame, text=f"{self.config.get('pid', 'kp'):.2f}", width=50)
-        self.p_value.pack(side="left", padx=5)
-        
-        # I Gain
-        i_frame = ctk.CTkFrame(gains_frame)
-        i_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(i_frame, text="I:", width=30).pack(side="left", padx=5)
-        self.i_slider = ctk.CTkSlider(
-            i_frame, from_=0, to=2, number_of_steps=100,
-            command=self.on_pid_change
-        )
-        self.i_slider.set(self.config.get('pid', 'ki'))
-        self.i_slider.pack(side="left", fill="x", expand=True, padx=5)
-        self.i_value = ctk.CTkLabel(i_frame, text=f"{self.config.get('pid', 'ki'):.3f}", width=50)
-        self.i_value.pack(side="left", padx=5)
-        
-        # D Gain
-        d_frame = ctk.CTkFrame(gains_frame)
-        d_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(d_frame, text="D:", width=30).pack(side="left", padx=5)
-        self.d_slider = ctk.CTkSlider(
-            d_frame, from_=0, to=5, number_of_steps=100,
-            command=self.on_pid_change
-        )
-        self.d_slider.set(self.config.get('pid', 'kd'))
-        self.d_slider.pack(side="left", fill="x", expand=True, padx=5)
-        self.d_value = ctk.CTkLabel(d_frame, text=f"{self.config.get('pid', 'kd'):.2f}", width=50)
-        self.d_value.pack(side="left", padx=5)
-        
-        # Motor Settings
-        motor_frame = ctk.CTkFrame(self.pid_tab)
-        motor_frame.pack(fill="x", padx=10, pady=10)
-        
-        ctk.CTkLabel(motor_frame, text="Motor Settings", font=("Arial", 14, "bold")).pack()
-        
-        # Max Speed
-        speed_frame = ctk.CTkFrame(motor_frame)
-        speed_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(speed_frame, text="Max Speed:", width=100).pack(side="left", padx=5)
-        self.speed_entry = ctk.CTkEntry(speed_frame, width=100)
-        self.speed_entry.insert(0, str(self.config.get('arduino', 'max_speed')))
-        self.speed_entry.pack(side="left", padx=5)
-        
-        # Max Acceleration
-        accel_frame = ctk.CTkFrame(motor_frame)
-        accel_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(accel_frame, text="Max Accel:", width=100).pack(side="left", padx=5)
-        self.accel_entry = ctk.CTkEntry(accel_frame, width=100)
-        self.accel_entry.insert(0, str(self.config.get('arduino', 'max_acceleration')))
-        self.accel_entry.pack(side="left", padx=5)
-        
-        # Apply button
-        self.apply_motor_btn = ctk.CTkButton(
-            motor_frame, text="Apply Motor Settings",
-            command=self.apply_motor_settings
-        )
-        self.apply_motor_btn.pack(pady=10)
-
-        # Invert direction checkbox
-        try:
-            invert_default = bool(self.config.get('arduino', 'invert_direction'))
-        except Exception:
-            invert_default = False
-        self.invert_dir_var = tk.BooleanVar(value=invert_default)
-        self.invert_dir_check = ctk.CTkCheckBox(
-            motor_frame, text="Invert Direction", variable=self.invert_dir_var,
-            command=self.on_invert_direction_change
-        )
-        self.invert_dir_check.pack(pady=5)
-
-        # Command throttling (Deadband & Min Interval)
-        throttle_frame = ctk.CTkFrame(self.pid_tab)
-        throttle_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(throttle_frame, text="Command Throttling", font=("Arial", 14, "bold")).pack()
-
-        # Deadband slider
-        db_frame = ctk.CTkFrame(throttle_frame)
-        db_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(db_frame, text="Deadband (deg):", width=140).pack(side="left", padx=5)
-        self.deadband_slider = ctk.CTkSlider(
-            db_frame, from_=0.0, to=0.50, number_of_steps=50,
-            command=self.on_deadband_change
-        )
-        self.deadband_slider.set(self.config.get('arduino', 'command_deadband_deg'))
-        self.deadband_value = ctk.CTkLabel(db_frame, text=f"{self.config.get('arduino', 'command_deadband_deg'):.3f}")
-        self.deadband_slider.pack(side="left", fill="x", expand=True, padx=5)
-        self.deadband_value.pack(side="left", padx=5)
-
-        # Min command interval slider
-        mi_frame = ctk.CTkFrame(throttle_frame)
-        mi_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(mi_frame, text="Min Cmd Interval (ms):", width=180).pack(side="left", padx=5)
-        self.min_interval_slider = ctk.CTkSlider(
-            mi_frame, from_=10, to=100, number_of_steps=90,
-            command=self.on_min_interval_change
-        )
-        self.min_interval_slider.set(self.config.get('arduino', 'min_command_interval_ms'))
-        self.min_interval_value = ctk.CTkLabel(mi_frame, text=f"{self.config.get('arduino', 'min_command_interval_ms'):.0f}")
-        self.min_interval_slider.pack(side="left", fill="x", expand=True, padx=5)
-        self.min_interval_value.pack(side="left", padx=5)
-        
-        # Auto-tune options
-        autotune_frame = ctk.CTkFrame(self.pid_tab)
-        autotune_frame.pack(fill="x", padx=10, pady=10)
-        
-        ctk.CTkLabel(autotune_frame, text="Auto-Tuning", font=("Arial", 14, "bold")).pack()
-        
-        self.adaptive_var = tk.BooleanVar(value=False)
-        self.adaptive_check = ctk.CTkCheckBox(
-            autotune_frame, text="Enable Adaptive PID",
-            variable=self.adaptive_var,
-            command=self.toggle_adaptive_pid
-        )
-        self.adaptive_check.pack(pady=5)
     
     def setup_tracking_tab(self):
         """Setup tracking settings tab"""
@@ -706,70 +612,25 @@ class HumanTrackingApp(ctk.CTk):
                                 self.tracking_mode_var.get()
                             )
                             
-                        if target_pos:
-                            # Ensure numeric tuple (x, y)
-                            try:
-                                target_pos = (float(target_pos[0]), float(target_pos[1]))
-                            except Exception:
-                                # Skip this frame if target position is invalid
-                                raise ValueError(f"Invalid target_pos: {target_pos}")
-
-                            # Apply smoothing
-                            if self.smoothing_var.get():
-                                try:
-                                    smoothed = self.position_smoother.update(target_pos)
-                                    if smoothed is not None:
-                                        target_pos = (float(smoothed[0]), float(smoothed[1]))
-                                except Exception as e:
-                                    # Fallback to raw target on smoothing errors
-                                    self.log(f"Smoothing error: {e}")
-                            
-                            # Update PID controller with measured X (setpoint is 0.5)
-                            measured_x_raw = float(target_pos[0])
-                            measured_x, _cal = self._map_x(measured_x_raw)
-                            # Use explicit dt for better derivative behavior
-                            now = time.time()
-                            last_time = getattr(self, '_last_control_time', now)
-                            dt = max(1e-3, now - last_time)
-                            self._last_control_time = now
-                            # Center deadband (normalized around setpoint) to suppress chatter
-                            try:
-                                center_db_norm = float(self.config.get('tracking', 'center_deadband_norm') or 0.0)
-                            except Exception:
-                                center_db_norm = 0.0
-
-                            error_norm = float(self.pid_controller.setpoint) - float(measured_x)
-
-                            if abs(error_norm) < center_db_norm:
-                                # Within deadband: do not send movement; also damp PID state
-                                delta_deg = 0.0
-                                try:
-                                    # Lightly reset derivative to avoid ping-pong on exit of deadband
-                                    self.pid_controller.filtered_derivative = 0.0
-                                except Exception:
-                                    pass
-                            else:
-                                # Outside deadband: compute PID and apply slew rate limiting
-                                raw_output = self.pid_controller.update(measured_x, dt)
-                                try:
-                                    slew_rate = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
-                                except Exception:
-                                    slew_rate = 25.0
-                                max_delta = max(0.0, slew_rate * dt)
-                                delta_deg = float(np.clip(raw_output, -max_delta, max_delta))
-
-                                # Send incremental move to Arduino
-                                if self.arduino.connected and abs(delta_deg) > 0.0:
-                                    if self.arduino.move_by_delta(delta_deg):
-                                        # Record send time for timing analysis
-                                        self.last_move_send_time = time.time()
-
-                            # Store for monitoring (error relative to center)
-                            self.error_history.append(self.pid_controller.setpoint - measured_x)
-                            self.output_history.append(delta_deg)
-
-                            # Debug visualization overlays
-                            self._draw_calibration_debug(annotated_frame, measured_x_raw, measured_x, delta_deg)
+                        # Use the refactored pipeline for detection and movement
+                        output = self.face_pipeline.step(frame)
+                        if output.detected and output.detection and output.detection.annotated_frame is not None:
+                            annotated_frame = output.detection.annotated_frame
+                        # Update histories
+                        if output.error_norm is not None:
+                            self.error_history.append(output.error_norm)
+                        self.output_history.append(output.move.delta_deg)
+                        # Draw overlays
+                        if output.measured_x_raw is not None and output.measured_x_cal is not None:
+                            self._draw_calibration_debug(
+                                annotated_frame,
+                                float(output.measured_x_raw),
+                                float(output.measured_x_cal),
+                                float(output.move.delta_deg),
+                            )
+                        # Record send timing for feedback dt
+                        if output.move.sent:
+                            self.last_move_send_time = time.time()
                     
                     # Add frame to display queue
                     try:
@@ -1070,17 +931,9 @@ class HumanTrackingApp(ctk.CTk):
     
     def on_pid_change(self, value):
         """Handle PID slider changes"""
-        kp = self.p_slider.get()
-        ki = self.i_slider.get()
-        kd = self.d_slider.get()
-        
-        self.p_value.configure(text=f"{kp:.2f}")
-        self.i_value.configure(text=f"{ki:.3f}")
-        self.d_value.configure(text=f"{kd:.2f}")
-        
+        kp, ki, kd = self.pid_ui.get_pid_values()
+        self.pid_ui.set_pid_labels(kp, ki, kd)
         self.pid_controller.set_tunings(kp, ki, kd)
-        
-        # Update config
         self.config.set('pid', 'kp', kp)
         self.config.set('pid', 'ki', ki)
         self.config.set('pid', 'kd', kd)
@@ -1088,8 +941,7 @@ class HumanTrackingApp(ctk.CTk):
     def apply_motor_settings(self):
         """Apply motor settings to Arduino"""
         try:
-            max_speed = float(self.speed_entry.get())
-            max_accel = float(self.accel_entry.get())
+            max_speed, max_accel = self.pid_ui.get_motor_settings()
             
             if self.arduino.connected:
                 self.arduino.update_settings(
@@ -1112,7 +964,7 @@ class HumanTrackingApp(ctk.CTk):
             db = float(value)
         except Exception:
             return
-        self.deadband_value.configure(text=f"{db:.3f}")
+        self.pid_ui.set_deadband_label(db)
         # Update controller and config immediately
         self.arduino.cmd_deadband_deg = db
         self.config.set('arduino', 'command_deadband_deg', db)
@@ -1124,7 +976,7 @@ class HumanTrackingApp(ctk.CTk):
             mi = float(value)
         except Exception:
             return
-        self.min_interval_value.configure(text=f"{mi:.0f}")
+        self.pid_ui.set_min_interval_label(mi)
         # Update controller and config immediately
         self.arduino.min_cmd_interval_ms = mi
         self.config.set('arduino', 'min_command_interval_ms', mi)
@@ -1132,7 +984,7 @@ class HumanTrackingApp(ctk.CTk):
     
     def on_invert_direction_change(self):
         """Toggle motor direction polarity"""
-        invert = bool(self.invert_dir_var.get())
+        invert = bool(self.pid_ui.get_invert_dir_value())
         # Update config and controller immediately
         self.config.set('arduino', 'invert_direction', invert)
         try:
@@ -1144,7 +996,7 @@ class HumanTrackingApp(ctk.CTk):
     
     def toggle_adaptive_pid(self):
         """Toggle adaptive PID"""
-        if self.adaptive_var.get():
+        if self.pid_ui.get_adaptive_enabled():
             self.pid_controller.enable_adaptation(True)
             self.log("Adaptive PID enabled")
         else:
