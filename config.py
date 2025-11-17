@@ -49,8 +49,8 @@ class Config:
             "max_speed": 40000,
             "max_acceleration": 40000,
             "feedback_rate": 20,  # Hz
-            "min_command_interval_ms": 10,
-            "command_deadband_deg": 0.0,
+            "min_command_interval_ms": 40,
+            "command_deadband_deg": 0.1,
             "invert_direction": False,
             "output_slew_rate_deg_per_sec": 40,
             "max_deg_per_sec": 40,
@@ -67,6 +67,7 @@ class Config:
             "smoothing_window": 5,
             "min_visibility": 0.5,
             "smoothing_alpha": 0.3,
+            "center_deadband_norm": 0.03,
             "focus_on_face": True
         },
         

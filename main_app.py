@@ -414,9 +414,9 @@ class HumanTrackingApp(ctk.CTk):
         # Smoothing settings
         smooth_frame = ctk.CTkFrame(self.tracking_tab)
         smooth_frame.pack(fill="x", padx=10, pady=10)
-        
+
         ctk.CTkLabel(smooth_frame, text="Smoothing", font=("Arial", 14, "bold")).pack()
-        
+
         self.smoothing_var = tk.BooleanVar(value=self.config.get('tracking', 'smoothing_enabled'))
         self.smoothing_check = ctk.CTkCheckBox(
             smooth_frame, text="Enable Smoothing",
@@ -424,6 +424,33 @@ class HumanTrackingApp(ctk.CTk):
             command=self.on_smoothing_change
         )
         self.smoothing_check.pack(pady=5)
+
+        # Smoothing window slider
+        sw_frame = ctk.CTkFrame(smooth_frame)
+        sw_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(sw_frame, text="Smoothing Window:", width=150).pack(side="left", padx=5)
+        self.smoothing_window_slider = ctk.CTkSlider(
+            sw_frame, from_=3, to=12, number_of_steps=9,
+            command=self.on_smoothing_window_change
+        )
+        self.smoothing_window_slider.set(self.config.get('tracking', 'smoothing_window'))
+        self.smoothing_window_value = ctk.CTkLabel(sw_frame, text=f"{self.config.get('tracking', 'smoothing_window'):.0f}")
+        self.smoothing_window_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.smoothing_window_value.pack(side="left", padx=5)
+
+        # Smoothing alpha slider
+        sa_frame = ctk.CTkFrame(smooth_frame)
+        sa_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(sa_frame, text="Smoothing Alpha:", width=150).pack(side="left", padx=5)
+        self.smoothing_alpha_slider = ctk.CTkSlider(
+            sa_frame, from_=0.0, to=1.0, number_of_steps=20,
+            command=self.on_smoothing_alpha_change
+        )
+        # Alpha is tracked under tracking.smoothing_alpha
+        self.smoothing_alpha_slider.set(self.config.get('tracking', 'smoothing_alpha'))
+        self.smoothing_alpha_value = ctk.CTkLabel(sa_frame, text=f"{self.config.get('tracking', 'smoothing_alpha'):.2f}")
+        self.smoothing_alpha_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.smoothing_alpha_value.pack(side="left", padx=5)
         
         # Confidence threshold
         conf_frame = ctk.CTkFrame(self.tracking_tab)
@@ -438,6 +465,51 @@ class HumanTrackingApp(ctk.CTk):
         self.confidence_slider.pack(side="left", fill="x", expand=True, padx=5)
         self.conf_value = ctk.CTkLabel(conf_frame, text="0.5", width=50)
         self.conf_value.pack(side="left", padx=5)
+
+        # Calibration controls (invert horizontal and center offset)
+        calib_frame = ctk.CTkFrame(self.tracking_tab)
+        calib_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(calib_frame, text="Calibration", font=("Arial", 14, "bold")).pack()
+
+        # Invert Horizontal
+        try:
+            invert_default = bool(self.config.get('calibration', 'invert_horizontal'))
+        except Exception:
+            invert_default = False
+        self.invert_horizontal_var = tk.BooleanVar(value=invert_default)
+        self.invert_horizontal_check = ctk.CTkCheckBox(
+            calib_frame, text="Invert Horizontal",
+            variable=self.invert_horizontal_var,
+            command=self.on_invert_horizontal_change
+        )
+        self.invert_horizontal_check.pack(pady=5)
+
+        # Center Offset X slider
+        co_frame = ctk.CTkFrame(calib_frame)
+        co_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(co_frame, text="Center Offset X:", width=140).pack(side="left", padx=5)
+        self.center_offset_slider = ctk.CTkSlider(
+            co_frame, from_=-0.20, to=0.20, number_of_steps=80,
+            command=self.on_center_offset_change
+        )
+        self.center_offset_slider.set(self.config.get('calibration', 'center_offset_x') or 0.0)
+        self.center_offset_value = ctk.CTkLabel(co_frame, text=f"{(self.config.get('calibration', 'center_offset_x') or 0.0):.3f}")
+        self.center_offset_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.center_offset_value.pack(side="left", padx=5)
+
+        # Center Deadband (normalized)
+        dbn_frame = ctk.CTkFrame(calib_frame)
+        dbn_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(dbn_frame, text="Center Deadband (norm):", width=180).pack(side="left", padx=5)
+        self.center_deadband_slider = ctk.CTkSlider(
+            dbn_frame, from_=0.0, to=0.20, number_of_steps=20,
+            command=self.on_center_deadband_change
+        )
+        # Default to config value or 0.0
+        self.center_deadband_slider.set(self.config.get('tracking', 'center_deadband_norm') or 0.0)
+        self.center_deadband_value = ctk.CTkLabel(dbn_frame, text=f"{(self.config.get('tracking', 'center_deadband_norm') or 0.0):.3f}")
+        self.center_deadband_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.center_deadband_value.pack(side="left", padx=5)
     
     def setup_monitor_tab(self):
         """Setup monitoring graphs tab"""
@@ -536,6 +608,18 @@ class HumanTrackingApp(ctk.CTk):
         center_px = int(0.5 * w)
         cv2.line(frame, (center_px, 0), (center_px, h), (80, 80, 80), 1)
 
+        # Draw center deadband bounds
+        try:
+            center_db_norm = float(self.config.get('tracking', 'center_deadband_norm') or 0.0)
+        except Exception:
+            center_db_norm = 0.0
+        if center_db_norm > 0.0:
+            db_px = int(center_db_norm * w)
+            left_db_px = max(0, center_px - db_px)
+            right_db_px = min(w - 1, center_px + db_px)
+            cv2.line(frame, (left_db_px, 0), (left_db_px, h), (120, 120, 120), 1)
+            cv2.line(frame, (right_db_px, 0), (right_db_px, h), (120, 120, 120), 1)
+
         # Raw and calibrated X positions
         x_raw_px = int(float(x_raw) * w)
         x_cal_px = int(float(x_cal) * w)
@@ -550,7 +634,7 @@ class HumanTrackingApp(ctk.CTk):
 
         # Text block
         err = float(self.pid_controller.setpoint) - float(x_cal)
-        dbg = f"Xraw:{x_raw:.3f} Xcal:{x_cal:.3f} Err:{err:.3f} OutΔ:{out_delta:.2f}°"
+        dbg = f"Xraw:{x_raw:.3f} Xcal:{x_cal:.3f} Err:{err:.3f} DBn:{center_db_norm:.3f} OutΔ:{out_delta:.2f}°"
         cv2.putText(frame, dbg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     
     def setup_log_tab(self):
@@ -648,21 +732,37 @@ class HumanTrackingApp(ctk.CTk):
                             last_time = getattr(self, '_last_control_time', now)
                             dt = max(1e-3, now - last_time)
                             self._last_control_time = now
-                            raw_output = self.pid_controller.update(measured_x, dt)
-
-                            # Treat PID output as delta (deg) and limit slew rate
+                            # Center deadband (normalized around setpoint) to suppress chatter
                             try:
-                                slew_rate = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
+                                center_db_norm = float(self.config.get('tracking', 'center_deadband_norm') or 0.0)
                             except Exception:
-                                slew_rate = 25.0
-                            max_delta = max(0.0, slew_rate * dt)
-                            delta_deg = float(np.clip(raw_output, -max_delta, max_delta))
+                                center_db_norm = 0.0
 
-                            # Send incremental move to Arduino
-                            if self.arduino.connected:
-                                if self.arduino.move_by_delta(delta_deg):
-                                    # Record send time for timing analysis
-                                    self.last_move_send_time = time.time()
+                            error_norm = float(self.pid_controller.setpoint) - float(measured_x)
+
+                            if abs(error_norm) < center_db_norm:
+                                # Within deadband: do not send movement; also damp PID state
+                                delta_deg = 0.0
+                                try:
+                                    # Lightly reset derivative to avoid ping-pong on exit of deadband
+                                    self.pid_controller.filtered_derivative = 0.0
+                                except Exception:
+                                    pass
+                            else:
+                                # Outside deadband: compute PID and apply slew rate limiting
+                                raw_output = self.pid_controller.update(measured_x, dt)
+                                try:
+                                    slew_rate = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
+                                except Exception:
+                                    slew_rate = 25.0
+                                max_delta = max(0.0, slew_rate * dt)
+                                delta_deg = float(np.clip(raw_output, -max_delta, max_delta))
+
+                                # Send incremental move to Arduino
+                                if self.arduino.connected and abs(delta_deg) > 0.0:
+                                    if self.arduino.move_by_delta(delta_deg):
+                                        # Record send time for timing analysis
+                                        self.last_move_send_time = time.time()
 
                             # Store for monitoring (error relative to center)
                             self.error_history.append(self.pid_controller.setpoint - measured_x)
@@ -1073,6 +1173,67 @@ class HumanTrackingApp(ctk.CTk):
         self.conf_value.configure(text=f"{value:.2f}")
         self.config.set('pose_detection', 'min_detection_confidence', value)
         self.pose_detector.pose.min_detection_confidence = value
+
+    def on_smoothing_window_change(self, value):
+        """Handle smoothing window change"""
+        try:
+            win = int(round(float(value)))
+        except Exception:
+            win = 5
+        self.smoothing_window_value.configure(text=f"{win:.0f}")
+        self.config.set('tracking', 'smoothing_window', win)
+        # Recreate smoother with new window for immediate effect
+        try:
+            alpha = float(self.config.get('tracking', 'smoothing_alpha') or 0.3)
+        except Exception:
+            alpha = 0.3
+        try:
+            self.position_smoother = PositionSmoother(window_size=win, alpha=alpha)
+        except Exception:
+            pass
+        self.log(f"Smoothing window set to {win}")
+
+    def on_smoothing_alpha_change(self, value):
+        """Handle smoothing alpha (EMA factor) change"""
+        try:
+            alpha = max(0.0, min(1.0, float(value)))
+        except Exception:
+            alpha = 0.3
+        self.smoothing_alpha_value.configure(text=f"{alpha:.2f}")
+        self.config.set('tracking', 'smoothing_alpha', alpha)
+        # Update smoother alpha (PositionSmoother uses attribute alpha)
+        try:
+            if isinstance(self.position_smoother, PositionSmoother):
+                self.position_smoother.alpha = alpha
+        except Exception:
+            pass
+        self.log(f"Smoothing alpha set to {alpha:.2f}")
+
+    def on_invert_horizontal_change(self):
+        """Handle invert horizontal toggle"""
+        val = bool(self.invert_horizontal_var.get())
+        self.config.set('calibration', 'invert_horizontal', val)
+        self.log(f"Invert horizontal {'ON' if val else 'OFF'}")
+
+    def on_center_offset_change(self, value):
+        """Handle center offset X change"""
+        try:
+            offset = float(value)
+        except Exception:
+            offset = 0.0
+        self.center_offset_value.configure(text=f"{offset:.3f}")
+        self.config.set('calibration', 'center_offset_x', offset)
+        self.log(f"Center offset X set to {offset:.3f}")
+
+    def on_center_deadband_change(self, value):
+        """Handle center deadband (normalized) change"""
+        try:
+            dbn = max(0.0, float(value))
+        except Exception:
+            dbn = 0.0
+        self.center_deadband_value.configure(text=f"{dbn:.3f}")
+        self.config.set('tracking', 'center_deadband_norm', dbn)
+        self.log(f"Center deadband (norm) set to {dbn:.3f}")
     
     def on_arduino_feedback(self, feedback):
         """Handle Arduino feedback"""
