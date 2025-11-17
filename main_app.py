@@ -80,6 +80,7 @@ class HumanTrackingApp(ctk.CTk):
         self.fps_history = []
         self.error_history = []
         self.position_history = []
+        self.target_history = []
         self.output_history = []
         
         # Setup GUI
@@ -461,12 +462,24 @@ class HumanTrackingApp(ctk.CTk):
                         )
                         
                         if target_pos:
+                            # Ensure numeric tuple (x, y)
+                            try:
+                                target_pos = (float(target_pos[0]), float(target_pos[1]))
+                            except Exception:
+                                # Skip this frame if target position is invalid
+                                raise ValueError(f"Invalid target_pos: {target_pos}")
+
                             # Apply smoothing
                             if self.smoothing_var.get():
-                                target_pos = self.position_smoother.update(target_pos)
+                                smoothed = self.position_smoother.update(target_pos)
+                                if smoothed is not None:
+                                    try:
+                                        target_pos = (float(smoothed[0]), float(smoothed[1]))
+                                    except Exception:
+                                        raise ValueError(f"Invalid smoothed_pos: {smoothed}")
                             
                             # Update PID controller
-                            error = target_pos[0]  # X position (0-1, 0.5 is center)
+                            error = float(target_pos[0])  # X position (0-1, 0.5 is center)
                             output = self.pid_controller.update(error)
                             
                             # Send to Arduino
@@ -634,7 +647,21 @@ class HumanTrackingApp(ctk.CTk):
                 if device_str and device_str != "Scanning...":
                     try:
                         device_idx = int(device_str.split()[1])
-                        self.video_capture.start(device_idx)
+                        # Parse backend from option text e.g. "Device 0 (DirectShow)"
+                        backend_name = None
+                        lpar = device_str.find('(')
+                        rpar = device_str.find(')')
+                        if lpar != -1 and rpar != -1 and rpar > lpar:
+                            backend_name = device_str[lpar+1:rpar]
+                        # Map backend name to OpenCV constant
+                        import cv2 as _cv
+                        backend_map = {
+                            'DirectShow': _cv.CAP_DSHOW,
+                            'Media Foundation': _cv.CAP_MSMF,
+                            'Any': _cv.CAP_ANY
+                        }
+                        backend_id = backend_map.get(backend_name, _cv.CAP_DSHOW)
+                        self.video_capture.start(device_idx, backend=backend_id)
                     except:
                         self.log("Failed to parse device index")
         else:
@@ -710,11 +737,24 @@ class HumanTrackingApp(ctk.CTk):
         if value and value != "Scanning..." and value != "No devices found":
             try:
                 device_idx = int(value.split()[1])
+                # Parse backend name from option text
+                backend_name = None
+                lpar = value.find('(')
+                rpar = value.find(')')
+                if lpar != -1 and rpar != -1 and rpar > lpar:
+                    backend_name = value[lpar+1:rpar]
+                import cv2 as _cv
+                backend_map = {
+                    'DirectShow': _cv.CAP_DSHOW,
+                    'Media Foundation': _cv.CAP_MSMF,
+                    'Any': _cv.CAP_ANY
+                }
+                backend_id = backend_map.get(backend_name, _cv.CAP_DSHOW)
                 if self.video_capture.state.name == 'RUNNING':
                     self.video_capture.stop()
                     time.sleep(0.5)
-                    self.video_capture.start(device_idx)
-                    self.log(f"Switched to video device {device_idx}")
+                    self.video_capture.start(device_idx, backend=backend_id)
+                    self.log(f"Switched to video device {device_idx} ({backend_name or 'DirectShow'})")
             except:
                 self.log("Failed to parse device index")
     
