@@ -80,6 +80,11 @@ class ArduinoController:
         # Command throttling configuration
         self.min_cmd_interval_ms = float(self.config.get('min_command_interval_ms', 40))
         self.cmd_deadband_deg = float(self.config.get('command_deadband_deg', 0.2))
+        # Direction polarity (invert if camera mount requires opposite rotation)
+        try:
+            self.direction_sign = -1 if bool(self.config.get('invert_direction', False)) else 1
+        except Exception:
+            self.direction_sign = 1
         self.last_cmd_time = 0.0
         self.last_sent_angle = 0.0
         self.cmd_skips_deadband = 0
@@ -191,6 +196,12 @@ class ArduinoController:
         if not self.connected:
             return False
         
+        # Apply configured direction polarity
+        try:
+            angle = float(angle) * float(self.direction_sign)
+        except Exception:
+            angle = float(angle)
+
         # Limit angle to valid range
         angle = max(-180, min(180, angle))
 
@@ -457,6 +468,13 @@ class ArduinoController:
     def set_error_callback(self, callback):
         """Set callback for error messages"""
         self.error_callback = callback
+
+    def set_direction_invert(self, invert: bool):
+        """Update direction polarity at runtime"""
+        try:
+            self.direction_sign = -1 if bool(invert) else 1
+        except Exception:
+            self.direction_sign = 1
 
 
 class AsyncArduinoScanner:
