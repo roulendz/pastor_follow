@@ -323,6 +323,18 @@ class HumanTrackingApp(ctk.CTk):
         )
         self.apply_motor_btn.pack(pady=10)
 
+        # Invert direction checkbox
+        try:
+            invert_default = bool(self.config.get('arduino', 'invert_direction'))
+        except Exception:
+            invert_default = False
+        self.invert_dir_var = tk.BooleanVar(value=invert_default)
+        self.invert_dir_check = ctk.CTkCheckBox(
+            motor_frame, text="Invert Direction", variable=self.invert_dir_var,
+            command=self.on_invert_direction_change
+        )
+        self.invert_dir_check.pack(pady=5)
+
         # Command throttling (Deadband & Min Interval)
         throttle_frame = ctk.CTkFrame(self.pid_tab)
         throttle_frame.pack(fill="x", padx=10, pady=10)
@@ -940,6 +952,18 @@ class HumanTrackingApp(ctk.CTk):
         self.arduino.min_cmd_interval_ms = mi
         self.config.set('arduino', 'min_command_interval_ms', mi)
         self.log(f"Min command interval set to {mi:.0f} ms")
+    
+    def on_invert_direction_change(self):
+        """Toggle motor direction polarity"""
+        invert = bool(self.invert_dir_var.get())
+        # Update config and controller immediately
+        self.config.set('arduino', 'invert_direction', invert)
+        try:
+            self.arduino.set_direction_invert(invert)
+        except Exception:
+            # Fallback if controller not ready
+            pass
+        self.log(f"Invert direction {'ON' if invert else 'OFF'}")
     
     def toggle_adaptive_pid(self):
         """Toggle adaptive PID"""
