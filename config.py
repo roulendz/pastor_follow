@@ -77,14 +77,23 @@ class Config:
             "show_skeleton": True,
             "show_fps": True,
             "show_pid_output": True,
-            "plot_history_length": 100
+            "plot_history_length": 100,
+            "show_calibration_debug": True
         },
-        
+
         # Performance settings
         "performance": {
             "use_gpu": False,
             "max_frame_skip": 2,
             "processing_threads": 2
+        },
+
+        # Calibration settings
+        "calibration": {
+            "invert_horizontal": False,   # flip X (1 - x)
+            "center_offset_x": 0.0,      # shift X to align visual center
+            "x_clamp_min": 0.0,
+            "x_clamp_max": 1.0
         }
     }
     

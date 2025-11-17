@@ -486,6 +486,72 @@ class HumanTrackingApp(ctk.CTk):
             justify="left", anchor="w"
         )
         self.stats_text.pack(padx=10, pady=5)
+
+    # --- Calibration helpers ---
+    def _map_x(self, x: float) -> tuple:
+        """Apply horizontal calibration mapping to normalized X.
+
+        Returns (x_calibrated, details_dict).
+        """
+        try:
+            invert = bool(self.config.get('calibration', 'invert_horizontal'))
+        except Exception:
+            invert = False
+        try:
+            offset = float(self.config.get('calibration', 'center_offset_x') or 0.0)
+        except Exception:
+            offset = 0.0
+        try:
+            x_min = float(self.config.get('calibration', 'x_clamp_min') or 0.0)
+        except Exception:
+            x_min = 0.0
+        try:
+            x_max = float(self.config.get('calibration', 'x_clamp_max') or 1.0)
+        except Exception:
+            x_max = 1.0
+
+        x_m = 1.0 - float(x) if invert else float(x)
+        x_m = x_m + offset
+        x_m = float(np.clip(x_m, x_min, x_max))
+
+        return x_m, {
+            'invert': invert,
+            'offset': offset,
+            'x_min': x_min,
+            'x_max': x_max
+        }
+
+    def _draw_calibration_debug(self, frame, x_raw: float, x_cal: float, out_delta: float):
+        """Overlay calibration debug visuals on the frame."""
+        try:
+            if not bool(self.config.get('gui', 'show_calibration_debug')):
+                return
+        except Exception:
+            # Default to showing debug if config missing
+            pass
+
+        h, w = frame.shape[:2]
+
+        # Visual center line
+        center_px = int(0.5 * w)
+        cv2.line(frame, (center_px, 0), (center_px, h), (80, 80, 80), 1)
+
+        # Raw and calibrated X positions
+        x_raw_px = int(float(x_raw) * w)
+        x_cal_px = int(float(x_cal) * w)
+
+        cv2.line(frame, (x_raw_px, 0), (x_raw_px, h), (0, 140, 255), 1)  # orange
+        cv2.line(frame, (x_cal_px, 0), (x_cal_px, h), (0, 255, 255), 1)  # yellow
+
+        # Arrow indicating OutΔ direction
+        arrow_len = int(40 * (1 if out_delta >= 0 else -1))
+        base_y = int(0.15 * h)
+        cv2.arrowedLine(frame, (center_px, base_y), (center_px + arrow_len, base_y), (255, 255, 255), 2, tipLength=0.2)
+
+        # Text block
+        err = float(self.pid_controller.setpoint) - float(x_cal)
+        dbg = f"Xraw:{x_raw:.3f} Xcal:{x_cal:.3f} Err:{err:.3f} OutΔ:{out_delta:.2f}°"
+        cv2.putText(frame, dbg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     
     def setup_log_tab(self):
         """Setup logging tab"""
@@ -575,7 +641,8 @@ class HumanTrackingApp(ctk.CTk):
                                     self.log(f"Smoothing error: {e}")
                             
                             # Update PID controller with measured X (setpoint is 0.5)
-                            measured_x = float(target_pos[0])
+                            measured_x_raw = float(target_pos[0])
+                            measured_x, _cal = self._map_x(measured_x_raw)
                             # Use explicit dt for better derivative behavior
                             now = time.time()
                             last_time = getattr(self, '_last_control_time', now)
@@ -601,11 +668,8 @@ class HumanTrackingApp(ctk.CTk):
                             self.error_history.append(self.pid_controller.setpoint - measured_x)
                             self.output_history.append(delta_deg)
 
-                            # Draw tracking info on frame
-                            cv2.putText(annotated_frame,
-                                    f"X: {measured_x:.3f} | OutΔ: {delta_deg:.1f}°",
-                                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.7, (0, 255, 255), 2)
+                            # Debug visualization overlays
+                            self._draw_calibration_debug(annotated_frame, measured_x_raw, measured_x, delta_deg)
                     
                     # Add frame to display queue
                     try:
