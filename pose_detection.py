@@ -269,28 +269,43 @@ class PositionSmoother:
     def update(self, position: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
         """Update with new position and return smoothed position"""
         if position is None:
-            return self.smoothed_position
-        
-        self.position_history.append(position)
+            return tuple(self.smoothed_position) if self.smoothed_position is not None else None
+
+        # Ensure numeric 2-tuple
+        try:
+            px = float(position[0])
+            py = float(position[1])
+        except Exception:
+            # Invalid input, ignore this update
+            return tuple(self.smoothed_position) if self.smoothed_position is not None else None
+
+        self.position_history.append((px, py))
         
         if len(self.position_history) < 2:
             self.smoothed_position = position
             return position
         
         # Moving average smoothing
-        positions = np.array(self.position_history)
+        positions = np.array(self.position_history, dtype=float)
         avg_position = np.mean(positions, axis=0)
         
         # Exponential smoothing
         if self.smoothed_position is None:
-            self.smoothed_position = avg_position
+            # Store as numpy array for safe arithmetic
+            self.smoothed_position = np.asarray(avg_position, dtype=float)
         else:
-            self.smoothed_position = (
-                self.alpha * avg_position + 
-                (1 - self.alpha) * self.smoothed_position
-            )
+            # Ensure internal type is numpy array
+            try:
+                current = np.asarray(self.smoothed_position, dtype=float)
+                self.smoothed_position = (
+                    float(self.alpha) * avg_position + 
+                    (1.0 - float(self.alpha)) * current
+                )
+            except Exception:
+                # Fallback if anything goes wrong
+                self.smoothed_position = np.asarray(avg_position, dtype=float)
         
-        return tuple(self.smoothed_position)
+        return (float(self.smoothed_position[0]), float(self.smoothed_position[1]))
     
     def reset(self):
         """Reset the smoother"""
