@@ -498,9 +498,9 @@ class HumanTrackingApp(ctk.CTk):
                             
                             # Draw tracking info on frame
                             cv2.putText(annotated_frame, 
-                                      f"Target: {error:.3f} | Output: {output:.1f}°",
-                                      (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                                      0.7, (0, 255, 255), 2)
+                                    f"Target: {error:.3f} | Output: {output:.1f}°",
+                                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.7, (0, 255, 255), 2)
                     
                     # Add frame to display queue
                     try:
