@@ -450,8 +450,13 @@ class HumanTrackingApp(ctk.CTk):
                 ret, frame = self.video_capture.get_frame(timeout=0.1)
                 
                 if ret and frame is not None:
-                    # Process with pose detection
-                    persons, annotated_frame = self.pose_detector.process_frame(frame)
+                    # Process with pose detection (guard against errors)
+                    try:
+                        persons, annotated_frame = self.pose_detector.process_frame(frame)
+                    except Exception as e:
+                        annotated_frame = frame
+                        persons = []
+                        self.log(f"Pose processing error: {e}")
                     
                     # Get target position if tracking is enabled
                     if self.tracking_enabled and persons:
@@ -471,12 +476,13 @@ class HumanTrackingApp(ctk.CTk):
 
                             # Apply smoothing
                             if self.smoothing_var.get():
-                                smoothed = self.position_smoother.update(target_pos)
-                                if smoothed is not None:
-                                    try:
+                                try:
+                                    smoothed = self.position_smoother.update(target_pos)
+                                    if smoothed is not None:
                                         target_pos = (float(smoothed[0]), float(smoothed[1]))
-                                    except Exception:
-                                        raise ValueError(f"Invalid smoothed_pos: {smoothed}")
+                                except Exception as e:
+                                    # Fallback to raw target on smoothing errors
+                                    self.log(f"Smoothing error: {e}")
                             
                             # Update PID controller
                             error = float(target_pos[0])  # X position (0-1, 0.5 is center)
@@ -675,6 +681,9 @@ class HumanTrackingApp(ctk.CTk):
             self.log("Tracking disabled")
             self.position_smoother.reset()
             self.pid_controller.reset()
+            # Clear recent histories to restore normal display
+            self.error_history.clear()
+            self.output_history.clear()
     
     def home_position(self):
         """Move to home position"""
