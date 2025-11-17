@@ -148,7 +148,7 @@ class HumanTrackingApp(ctk.CTk):
         self.video_device_menu.pack(side="left", padx=5)
         
         self.scan_video_btn = ctk.CTkButton(
-            self.device_frame, text="Scan", width=60,
+            self.device_frame, text="Scan Cameras", width=100,
             command=self.scan_video_devices
         )
         self.scan_video_btn.pack(side="left", padx=5)
@@ -162,13 +162,13 @@ class HumanTrackingApp(ctk.CTk):
         self.arduino_port_menu.pack(side="left", padx=5)
         
         self.scan_arduino_btn = ctk.CTkButton(
-            self.device_frame, text="Scan", width=60,
+            self.device_frame, text="Scan Arduinos", width=110,
             command=self.scan_arduino_devices
         )
         self.scan_arduino_btn.pack(side="left", padx=5)
-        
+
         self.connect_arduino_btn = ctk.CTkButton(
-            self.device_frame, text="Connect", width=80,
+            self.device_frame, text="Connect Arduino", width=130,
             command=self.connect_arduino
         )
         self.connect_arduino_btn.pack(side="left", padx=5)
@@ -527,12 +527,18 @@ class HumanTrackingApp(ctk.CTk):
         stats = self.video_capture.get_stats()
         self.fps_label.configure(text=f"FPS: {stats.get('fps', 0):.1f}")
         
+        # Compose clearer status including video and Arduino
+        video_state = stats.get('state', 'STOPPED')
+        status_text = f"Video: {video_state}"
         if self.arduino.connected:
             arduino_status = self.arduino.get_status()
-            self.status_label.configure(
-                text=f"Status: Connected | Pos: {arduino_status['current_position']:.1f}° | "
-                     f"Target: {arduino_status['target_position']:.1f}°"
+            status_text += (
+                f" | Arduino: Connected | Pos: {arduino_status['current_position']:.1f}° | "
+                f"Target: {arduino_status['target_position']:.1f}°"
             )
+        else:
+            status_text += " | Arduino: Disconnected"
+        self.status_label.configure(text=f"Status: {status_text}")
         
         # Update plots (every 5th frame to reduce CPU load)
         if hasattr(self, 'update_counter'):
@@ -769,7 +775,7 @@ class HumanTrackingApp(ctk.CTk):
         port = self.arduino_port_var.get()
         if port and port != "Scanning..." and port != "No devices found":
             if self.arduino.connect(port):
-                self.connect_arduino_btn.configure(text="Disconnect", fg_color="green")
+                self.connect_arduino_btn.configure(text="Disconnect Arduino", fg_color="green")
                 self.log(f"Connected to Arduino on {port}")
             else:
                 self.log(f"Failed to connect to Arduino on {port}")
@@ -777,7 +783,7 @@ class HumanTrackingApp(ctk.CTk):
         else:
             if self.arduino.connected:
                 self.arduino.disconnect()
-                self.connect_arduino_btn.configure(text="Connect", fg_color=("gray75", "gray25"))
+                self.connect_arduino_btn.configure(text="Connect Arduino", fg_color=("gray75", "gray25"))
                 self.log("Disconnected from Arduino")
     
     def on_pid_change(self, value):
