@@ -1,0 +1,1 @@
+# Lightweight package marker for modular GUI components
