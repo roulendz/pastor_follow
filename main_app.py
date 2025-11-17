@@ -64,7 +64,7 @@ class HumanTrackingApp(ctk.CTk):
         self.pose_detector = PoseDetector(self.config.get('pose_detection'))
         self.position_smoother = PositionSmoother(
             window_size=self.config.get('tracking', 'smoothing_window'),
-            alpha=self.config.get('pid', 'smoothing_factor')
+            alpha=self.config.get('tracking', 'smoothing_alpha')
         )
         self.pid_controller = AdaptivePIDController(
             kp=self.config.get('pid', 'kp'),
@@ -582,40 +582,23 @@ class HumanTrackingApp(ctk.CTk):
                 ret, frame = self.video_capture.get_frame(timeout=0.1)
                 
                 if ret and frame is not None:
-                    # Process with pose detection (guard against errors)
-                    try:
-                        persons, annotated_frame = self.pose_detector.process_frame(frame)
-                    except Exception as e:
-                        annotated_frame = frame
-                        persons = []
-                        self.log(f"Pose processing error: {e}")
-                    
-                    # Get target position if tracking is enabled
-                    if self.tracking_enabled:
-                        target_pos = None
+                    # Default annotated frame
+                    annotated_frame = frame
 
-                        # Manual override: use clicked target if enabled
-                        if self.manual_target_enabled and self.manual_target_pos is not None:
-                            target_pos = (float(self.manual_target_pos[0]), float(self.manual_target_pos[1]))
-                            # Draw marker at manual target
-                            try:
-                                mx = int(target_pos[0] * annotated_frame.shape[1])
-                                my = int(target_pos[1] * annotated_frame.shape[0])
-                                cv2.drawMarker(annotated_frame, (mx, my), (0, 255, 0),
-                                               markerType=cv2.MARKER_CROSS, markerSize=14, thickness=2)
-                            except Exception:
-                                pass
-                        elif persons:
-                            target_pos = self.pose_detector.get_target_position(
-                                persons,
-                                self.body_part_var.get(),
-                                self.tracking_mode_var.get()
-                            )
-                            
-                        # Use the refactored pipeline for detection and movement
-                        output = self.face_pipeline.step(frame)
-                        if output.detected and output.detection and output.detection.annotated_frame is not None:
-                            annotated_frame = output.detection.annotated_frame
+                    # Manual override marker (UI only)
+                    if self.tracking_enabled and self.manual_target_enabled and self.manual_target_pos is not None:
+                        try:
+                            mx = int(float(self.manual_target_pos[0]) * annotated_frame.shape[1])
+                            my = int(float(self.manual_target_pos[1]) * annotated_frame.shape[0])
+                            cv2.drawMarker(annotated_frame, (mx, my), (0, 255, 0),
+                                           markerType=cv2.MARKER_CROSS, markerSize=14, thickness=2)
+                        except Exception:
+                            pass
+
+                    # Use the refactored pipeline for detection and movement
+                    output = self.face_pipeline.step(frame)
+                    if output.detected and output.detection and output.detection.annotated_frame is not None:
+                        annotated_frame = output.detection.annotated_frame
                         # Update histories
                         if output.error_norm is not None:
                             self.error_history.append(output.error_norm)

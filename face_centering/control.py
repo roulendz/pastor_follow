@@ -24,12 +24,25 @@ class MovementController:
 
     def compute_delta(self, measured_x: float, dt: float) -> float:
         raw = float(self.pid.update(measured_x, float(dt)))
-        # Optional output scaling to convert normalized error→degrees
+        # Determine units of PID output: if output_limits span is small (≤2),
+        # treat raw as normalized and apply output_scale_deg. If span is large,
+        # assume degrees and skip scaling to avoid double-scaling.
+        try:
+            limits = getattr(self.pid, "output_limits", (-1.0, 1.0))
+        except Exception:
+            limits = (-1.0, 1.0)
         try:
             output_scale = float(self.config.get('pid', 'output_scale_deg') or 1.0)
         except Exception:
             output_scale = 1.0
-        scaled = raw * output_scale
+        try:
+            span = abs(float(limits[1]) - float(limits[0]))
+        except Exception:
+            span = 2.0
+        if span <= 2.0:
+            scaled = raw * output_scale
+        else:
+            scaled = raw
         try:
             slew = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
         except Exception:
