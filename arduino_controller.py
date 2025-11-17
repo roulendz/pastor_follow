@@ -236,6 +236,31 @@ class ArduinoController:
         self.last_cmd_time = now
         self.last_sent_angle = angle
         return True
+
+    def move_by_delta(self, delta_deg: float) -> bool:
+        """Increment target by a delta in degrees and send as absolute angle.
+
+        This uses the most recent sent angle (or current feedback position if no command
+        has been sent yet) as the base, then adds the delta, and delegates to
+        `move_to_angle`. Direction inversion is applied inside `move_to_angle` so we
+        do not pre-apply it here.
+        """
+        if not self.connected:
+            return False
+
+        try:
+            delta = float(delta_deg)
+        except Exception:
+            delta = float(delta_deg) if isinstance(delta_deg, (int, float)) else 0.0
+
+        # Choose a base angle: prefer last sent angle, else current feedback position
+        base_angle = self.last_sent_angle
+        if base_angle == 0.0 and self.last_cmd_time == 0.0:
+            # No command has been sent yet; fall back to current feedback position
+            base_angle = self.current_position
+
+        target = base_angle + delta
+        return self.move_to_angle(target)
     
     def send_command(self, command_type: CommandType, params: Optional[List] = None):
         """Send a command to Arduino"""
