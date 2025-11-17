@@ -576,21 +576,34 @@ class HumanTrackingApp(ctk.CTk):
                             
                             # Update PID controller with measured X (setpoint is 0.5)
                             measured_x = float(target_pos[0])
-                            output = self.pid_controller.update(measured_x)
-                            
-                            # Send to Arduino
+                            # Use explicit dt for better derivative behavior
+                            now = time.time()
+                            last_time = getattr(self, '_last_control_time', now)
+                            dt = max(1e-3, now - last_time)
+                            self._last_control_time = now
+                            raw_output = self.pid_controller.update(measured_x, dt)
+
+                            # Treat PID output as delta (deg) and limit slew rate
+                            try:
+                                slew_rate = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
+                            except Exception:
+                                slew_rate = 25.0
+                            max_delta = max(0.0, slew_rate * dt)
+                            delta_deg = float(np.clip(raw_output, -max_delta, max_delta))
+
+                            # Send incremental move to Arduino
                             if self.arduino.connected:
-                                if self.arduino.move_to_angle(output):
+                                if self.arduino.move_by_delta(delta_deg):
                                     # Record send time for timing analysis
                                     self.last_move_send_time = time.time()
-                            
+
                             # Store for monitoring (error relative to center)
                             self.error_history.append(self.pid_controller.setpoint - measured_x)
-                            self.output_history.append(output)
-                            
+                            self.output_history.append(delta_deg)
+
                             # Draw tracking info on frame
-                            cv2.putText(annotated_frame, 
-                                    f"X: {measured_x:.3f} | Out: {output:.1f}°",
+                            cv2.putText(annotated_frame,
+                                    f"X: {measured_x:.3f} | OutΔ: {delta_deg:.1f}°",
                                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                                     0.7, (0, 255, 255), 2)
                     
