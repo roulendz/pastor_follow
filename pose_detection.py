@@ -78,9 +78,7 @@ class PoseDetector:
             smooth_landmarks=config.get('smooth_landmarks', True)
         )
         
-        # Tracking variables
-        self.persons = {}
-        self.next_person_id = 0
+        # Tracking variables (single-person policy: always ID=1)
         self.tracking_history = deque(maxlen=30)
         
         # Performance metrics
@@ -201,9 +199,12 @@ class PoseDetector:
         # Calculate overall confidence
         confidence = np.mean(visibility)
         
+        # Single-person project policy: always assign ID=1
+        assigned_id = 1
+
         # Create person object
         person = Person(
-            id=self.next_person_id,
+            id=assigned_id,
             landmarks=landmarks,
             visibility=visibility,
             bbox=bbox,
@@ -212,7 +213,6 @@ class PoseDetector:
             timestamp=time.time()
         )
         
-        self.next_person_id += 1
         return person
     
     def _draw_person_info(self, frame: np.ndarray, person: Person):
@@ -231,6 +231,11 @@ class PoseDetector:
         center_x = int(person.center[0] * frame.shape[1])
         center_y = int(person.center[1] * frame.shape[0])
         cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+
+    # Note: Multi-person IDs (1..N) require a multi-person detector.
+    # Current pipeline detects a single person. If you later switch to a
+    # multi-person model, implement a simple matching and assign IDs starting
+    # at 1 per frame, keeping the primary target as ID=1.
     
     def _update_fps(self):
         """Update detection FPS"""
