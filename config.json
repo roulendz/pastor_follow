@@ -8,7 +8,7 @@
     },
     "pose_detection": {
         "model_complexity": 1,
-        "min_detection_confidence": 0.5,
+        "min_detection_confidence": 0.29999999999999993,
         "min_tracking_confidence": 0.5,
         "enable_segmentation": false,
         "smooth_landmarks": true,
@@ -16,14 +16,15 @@
         "min_visibility": 0.5
     },
     "pid": {
-        "kp": 10.0,
-        "ki": 2.0,
-        "kd": 5.0,
+        "kp": 0.5999999999999996,
+        "ki": 0.08000000000000007,
+        "kd": 0.04999999999999982,
         "setpoint": 0.5,
         "output_min": -45,
         "output_max": 45,
         "deadzone": 0.02,
-        "smoothing_factor": 0.3
+        "smoothing_factor": 0.3,
+        "output_scale_deg": 60.0
     },
     "arduino": {
         "port": "COM3",
@@ -32,8 +33,8 @@
         "max_speed": 20000.0,
         "max_acceleration": 20000.0,
         "feedback_rate": 20,
-        "min_command_interval_ms": 17.0,
-        "command_deadband_deg": 0.04999999999999999,
+        "min_command_interval_ms": 32.0,
+        "command_deadband_deg": 0.0,
         "invert_direction": true,
         "output_slew_rate_deg_per_sec": 25,
         "max_deg_per_sec": 25,
@@ -45,9 +46,10 @@
         "target_body_part": "nose",
         "tracking_mode": "center",
         "smoothing_enabled": true,
-        "smoothing_window": 5,
+        "smoothing_window": 7,
         "min_visibility": 0.5,
-        "smoothing_alpha": 0.3,
+        "smoothing_alpha": 0.29999999999999993,
+        "center_deadband_norm": 0.03,
         "focus_on_face": true
     },
     "gui": {
@@ -56,11 +58,18 @@
         "show_skeleton": true,
         "show_fps": true,
         "show_pid_output": true,
-        "plot_history_length": 100
+        "plot_history_length": 100,
+        "show_calibration_debug": true
     },
     "performance": {
         "use_gpu": false,
         "max_frame_skip": 2,
         "processing_threads": 2
+    },
+    "calibration": {
+        "invert_horizontal": false,
+        "center_offset_x": 0.0,
+        "x_clamp_min": 0.0,
+        "x_clamp_max": 1.0
     }
 }
