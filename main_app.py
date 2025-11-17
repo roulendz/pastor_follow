@@ -684,8 +684,8 @@ class HumanTrackingApp(ctk.CTk):
         """Display frame in GUI"""
         # Resize frame to fit GUI
         height, width = frame.shape[:2]
-        max_width = 800
-        max_height = 600
+        max_width = 1280
+        max_height = 720
         
         if width > max_width or height > max_height:
             scale = min(max_width/width, max_height/height)
