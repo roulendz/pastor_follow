@@ -20,6 +20,7 @@ class Person:
     visibility: np.ndarray
     bbox: Tuple[int, int, int, int]  # x, y, width, height
     center: Tuple[float, float]  # normalized coordinates
+    target_point: Tuple[float, float]  # normalized coordinates used for tracking indicator
     confidence: float
     timestamp: float
 
@@ -86,6 +87,7 @@ class PoseDetector:
         self.detection_fps = 0
         self.last_fps_time = time.time()
         self.frame_count = 0
+        self.last_num_persons = 0
         
         # Thread safety
         self.lock = threading.Lock()
@@ -122,6 +124,7 @@ class PoseDetector:
         
         # Update performance metrics
         self.processing_time = time.time() - start_time
+        self.last_num_persons = len(persons)
         self._update_fps()
         
         return persons, annotated_frame
@@ -179,26 +182,71 @@ class PoseDetector:
         landmarks = np.array(landmarks)
         visibility = np.array(visibility)
         
-        # Calculate bounding box
-        visible_landmarks = landmarks[visibility > 0.5]
-        if len(visible_landmarks) > 0:
-            x_coords = visible_landmarks[:, 0] * width
-            y_coords = visible_landmarks[:, 1] * height
-            
+        # Calculate bounding box (supports face-only mode)
+        min_vis = float(self.config.get('min_visibility', 0.5))
+        use_face_only = bool(self.config.get('face_only_bboxes', True))
+
+        # Build masks
+        vis_mask = visibility > min_vis
+        face_indices = [
+            self.POSE_LANDMARKS['nose'],
+            self.POSE_LANDMARKS['left_eye'],
+            self.POSE_LANDMARKS['right_eye'],
+            self.POSE_LANDMARKS['left_ear'],
+            self.POSE_LANDMARKS['right_ear'],
+            self.POSE_LANDMARKS['mouth_left'],
+            self.POSE_LANDMARKS['mouth_right']
+        ]
+
+        def compute_bbox(coords_norm: np.ndarray) -> Tuple[Tuple[int, int, int, int], Tuple[float, float]]:
+            x_coords = coords_norm[:, 0] * width
+            y_coords = coords_norm[:, 1] * height
             x_min = int(np.min(x_coords))
             y_min = int(np.min(y_coords))
             x_max = int(np.max(x_coords))
             y_max = int(np.max(y_coords))
-            
-            bbox = (x_min, y_min, x_max - x_min, y_max - y_min)
-            center = ((x_min + x_max) / 2 / width, (y_min + y_max) / 2 / height)
-        else:
-            bbox = (0, 0, width, height)
-            center = (0.5, 0.5)
+            bbox_local = (x_min, y_min, x_max - x_min, y_max - y_min)
+            center_local = ((x_min + x_max) / 2 / width, (y_min + y_max) / 2 / height)
+            return bbox_local, center_local
+
+        bbox = (0, 0, width, height)
+        center = (0.5, 0.5)
+
+        try:
+            if use_face_only:
+                face_mask = np.zeros(len(landmarks), dtype=bool)
+                face_mask[face_indices] = True
+                selected = landmarks[np.logical_and(vis_mask, face_mask)]
+                if selected.shape[0] >= 2:
+                    bbox, center = compute_bbox(selected)
+                else:
+                    # Fallback to body if insufficient face landmarks
+                    body_selected = landmarks[vis_mask]
+                    if body_selected.shape[0] >= 2:
+                        bbox, center = compute_bbox(body_selected)
+            else:
+                body_selected = landmarks[vis_mask]
+                if body_selected.shape[0] >= 2:
+                    bbox, center = compute_bbox(body_selected)
+        except Exception:
+            # Keep defaults
+            pass
         
         # Calculate overall confidence
         confidence = np.mean(visibility)
         
+        # Choose target point (prefer nose if visible)
+        nose_idx = self.POSE_LANDMARKS['nose']
+        try:
+            nose = landmarks[nose_idx]
+            nose_vis = visibility[nose_idx]
+            if float(nose_vis) > min_vis:
+                target_point = (float(nose[0]), float(nose[1]))
+            else:
+                target_point = (float(center[0]), float(center[1]))
+        except Exception:
+            target_point = (float(center[0]), float(center[1]))
+
         # Single-person project policy: always assign ID=1
         assigned_id = 1
 
@@ -209,6 +257,7 @@ class PoseDetector:
             visibility=visibility,
             bbox=bbox,
             center=center,
+            target_point=target_point,
             confidence=confidence,
             timestamp=time.time()
         )
@@ -227,10 +276,10 @@ class PoseDetector:
         cv2.putText(frame, info_text, (x, y - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
         
-        # Draw center point
-        center_x = int(person.center[0] * frame.shape[1])
-        center_y = int(person.center[1] * frame.shape[0])
-        cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+        # Draw red dot at tracking target (nose or fallback center)
+        tx = int(person.target_point[0] * frame.shape[1])
+        ty = int(person.target_point[1] * frame.shape[0])
+        cv2.circle(frame, (tx, ty), 6, (0, 0, 255), -1)
 
     # Note: Multi-person IDs (1..N) require a multi-person detector.
     # Current pipeline detects a single person. If you later switch to a
@@ -252,7 +301,7 @@ class PoseDetector:
         return {
             'processing_time': self.processing_time * 1000,  # ms
             'detection_fps': self.detection_fps,
-            'num_persons': len(self.persons),
+            'num_persons': self.last_num_persons,
             'tracking_history_size': len(self.tracking_history)
         }
     

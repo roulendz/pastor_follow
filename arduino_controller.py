@@ -76,6 +76,14 @@ class ArduinoController:
         
         # Thread safety
         self.lock = threading.Lock()
+
+        # Command throttling configuration
+        self.min_cmd_interval_ms = float(self.config.get('min_command_interval_ms', 40))
+        self.cmd_deadband_deg = float(self.config.get('command_deadband_deg', 0.2))
+        self.last_cmd_time = 0.0
+        self.last_sent_angle = 0.0
+        self.cmd_skips_deadband = 0
+        self.cmd_skips_interval = 0
     
     @staticmethod
     def list_devices() -> List[ArduinoDevice]:
@@ -185,11 +193,37 @@ class ArduinoController:
         
         # Limit angle to valid range
         angle = max(-180, min(180, angle))
-        
+
+        now = time.time()
+        dt_ms = (now - self.last_cmd_time) * 1000.0
+        delta_deg = abs(angle - self.last_sent_angle)
+
+        # Deadband: skip tiny changes
+        if delta_deg < self.cmd_deadband_deg:
+            self.cmd_skips_deadband += 1
+            if self.feedback_callback:
+                try:
+                    self.feedback_callback(f"CMD_SKIP:DEADBAND delta={delta_deg:.3f}° deadband={self.cmd_deadband_deg:.3f}°")
+                except Exception:
+                    pass
+            return False
+
+        # Min interval: skip too-frequent commands
+        if dt_ms < self.min_cmd_interval_ms:
+            self.cmd_skips_interval += 1
+            if self.feedback_callback:
+                try:
+                    self.feedback_callback(f"CMD_SKIP:INTERVAL dt_ms={dt_ms:.1f} < {self.min_cmd_interval_ms:.1f}")
+                except Exception:
+                    pass
+            return False
+
         # Send move command
         command = f"{CommandType.MOVE.value},{angle:.2f}"
         self.command_queue.put(command)
         self.target_position = angle
+        self.last_cmd_time = now
+        self.last_sent_angle = angle
         return True
     
     def send_command(self, command_type: CommandType, params: Optional[List] = None):
@@ -262,13 +296,30 @@ class ArduinoController:
     
     def _send_settings(self):
         """Send initial settings to Arduino"""
+        # Compute max speed in steps/s if configured via deg/s
+        max_speed_steps = self.config.get('max_speed', 5000)
+        if 'max_deg_per_sec' in self.config:
+            try:
+                max_speed_steps = self._deg_s_to_steps_s(float(self.config.get('max_deg_per_sec', 30)))
+            except Exception:
+                pass
+
         self.update_settings(
-            self.config.get('max_speed', 5000),
+            max_speed_steps,
             self.config.get('max_acceleration', 2000),
             self.config.get('pid_p', 1.0),
             self.config.get('pid_i', 0.0),
             self.config.get('pid_d', 0.1)
         )
+
+    def _steps_per_degree(self) -> float:
+        steps_per_rev = float(self.config.get('steps_per_rev', 200))
+        microsteps = float(self.config.get('microsteps', 8))
+        gear_ratio = float(self.config.get('gear_ratio', 180))
+        return (steps_per_rev * microsteps * gear_ratio) / 360.0
+
+    def _deg_s_to_steps_s(self, deg_s: float) -> float:
+        return float(deg_s) * self._steps_per_degree()
     
     def _read_loop(self):
         """Thread loop for reading from Arduino"""
@@ -307,7 +358,9 @@ class ArduinoController:
                     # Trace commands sent
                     if self.feedback_callback:
                         try:
-                            self.feedback_callback(f"CMD:{command}")
+                            # Include queue size and interval info
+                            dt_ms = (time.time() - self.last_cmd_time) * 1000.0
+                            self.feedback_callback(f"CMD:{command} | dt_ms={dt_ms:.1f} queue={self.command_queue.qsize()}")
                         except Exception:
                             pass
                     

@@ -24,7 +24,9 @@ class Config:
             "min_detection_confidence": 0.5,
             "min_tracking_confidence": 0.5,
             "enable_segmentation": False,
-            "smooth_landmarks": True
+            "smooth_landmarks": True,
+            "face_only_bboxes": True,
+            "min_visibility": 0.5
         },
         
         # PID Controller settings
@@ -46,7 +48,14 @@ class Config:
             "timeout": 0.1,
             "max_speed": 5000,
             "max_acceleration": 2000,
-            "feedback_rate": 20  # Hz
+            "feedback_rate": 20,  # Hz
+            "min_command_interval_ms": 40,
+            "command_deadband_deg": 0.2,
+            "output_slew_rate_deg_per_sec": 60,
+            "max_deg_per_sec": 30,
+            "steps_per_rev": 200,
+            "gear_ratio": 180,
+            "microsteps": 8
         },
         
         # Tracking settings
@@ -55,7 +64,9 @@ class Config:
             "tracking_mode": "center",   # center, largest, closest
             "smoothing_enabled": True,
             "smoothing_window": 5,
-            "min_visibility": 0.5
+            "min_visibility": 0.5,
+            "smoothing_alpha": 0.3,
+            "focus_on_face": True
         },
         
         # GUI settings

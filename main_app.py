@@ -472,6 +472,8 @@ class HumanTrackingApp(ctk.CTk):
         """Start background processing threads"""
         self.processing_thread = threading.Thread(target=self.processing_loop, daemon=True)
         self.processing_thread.start()
+        # Track last send time for performance metrics
+        self.last_move_send_time = None
     
     def processing_loop(self):
         """Main processing loop running in background thread"""
@@ -535,7 +537,9 @@ class HumanTrackingApp(ctk.CTk):
                             
                             # Send to Arduino
                             if self.arduino.connected:
-                                self.arduino.move_to_angle(output)
+                                if self.arduino.move_to_angle(output):
+                                    # Record send time for timing analysis
+                                    self.last_move_send_time = time.time()
                             
                             # Store for monitoring (error relative to center)
                             self.error_history.append(self.pid_controller.setpoint - measured_x)
@@ -585,7 +589,8 @@ class HumanTrackingApp(ctk.CTk):
             arduino_status = self.arduino.get_status()
             status_text += (
                 f" | Arduino: Connected | Pos: {arduino_status['current_position']:.1f}° | "
-                f"Target: {arduino_status['target_position']:.1f}°"
+                f"Target: {arduino_status['target_position']:.1f}° | "
+                f"Cmds: {arduino_status['command_count']} | Fb: {arduino_status['feedback_count']}"
             )
         else:
             status_text += " | Arduino: Disconnected"
@@ -919,15 +924,45 @@ class HumanTrackingApp(ctk.CTk):
             # Log both high-level objects and raw strings
             if isinstance(feedback, dict):
                 # Not expected, but guard
-                    self.log(f"Arduino feedback (dict): {feedback}")
+                self.log(f"Arduino feedback (dict): {feedback}")
             elif hasattr(feedback, 'raw_data'):
                 fb = feedback
-                self.log(
-                    f"FB current={fb.current_angle:.2f}° target={fb.target_angle:.2f}° "
-                    f"speed={fb.current_speed:.1f} moving={int(fb.is_moving)} ts={fb.timestamp}"
-                )
+                # Include response age since last send if available
+                dt_ms = None
+                try:
+                    if self.last_move_send_time:
+                        dt_ms = (time.time() - self.last_move_send_time) * 1000.0
+                except Exception:
+                    dt_ms = None
+                if dt_ms is not None:
+                    self.log(
+                        f"FB current={fb.current_angle:.2f}° target={fb.target_angle:.2f}° "
+                        f"speed={fb.current_speed:.1f} moving={int(fb.is_moving)} ts={fb.timestamp} dt_ms={dt_ms:.1f}"
+                    )
+                else:
+                    self.log(
+                        f"FB current={fb.current_angle:.2f}° target={fb.target_angle:.2f}° "
+                        f"speed={fb.current_speed:.1f} moving={int(fb.is_moving)} ts={fb.timestamp}"
+                    )
             elif isinstance(feedback, str):
-                self.log(feedback)
+                # Detect command sends, acks, and throttling info
+                if feedback.startswith("CMD:"):
+                    self.log(feedback)
+                elif feedback.startswith("CMD_SKIP:"):
+                    self.log(feedback)
+                elif feedback.startswith("Move command acknowledged:"):
+                    try:
+                        dt_ms = None
+                        if self.last_move_send_time:
+                            dt_ms = (time.time() - self.last_move_send_time) * 1000.0
+                        if dt_ms is not None:
+                            self.log(f"{feedback} | ack_dt_ms={dt_ms:.1f}")
+                        else:
+                            self.log(feedback)
+                    except Exception:
+                        self.log(feedback)
+                else:
+                    self.log(feedback)
             else:
                 self.log(f"Arduino feedback: {feedback}")
         except Exception as e:
