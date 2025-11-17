@@ -38,7 +38,10 @@ class Config:
             "output_min": -45,  # degrees
             "output_max": 45,   # degrees
             "deadzone": 0.02,   # 2% of frame width
-            "smoothing_factor": 0.3
+            "smoothing_factor": 0.3,
+            # Maps normalized error units to degrees before slew limiting
+            # Increase if motion feels too weak when off-center
+            "output_scale_deg": 60.0
         },
         
         # Arduino settings
