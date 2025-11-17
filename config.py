@@ -51,6 +51,7 @@ class Config:
             "feedback_rate": 20,  # Hz
             "min_command_interval_ms": 40,
             "command_deadband_deg": 0.05,
+            "invert_direction": False,
             "output_slew_rate_deg_per_sec": 60,
             "max_deg_per_sec": 30,
             "steps_per_rev": 200,
