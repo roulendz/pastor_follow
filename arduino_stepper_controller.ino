@@ -18,6 +18,10 @@
 #define DIR_PIN 2      // D2 -> DIR+ 
 #define STEP_PIN 3     // D3 -> PUL+ (PWM capable pin)
 #define ENABLE_PIN 4   // D4 -> ENA+
+// Enable polarity configuration:
+// Set to 1 if HIGH enables the driver (common cathode typical)
+// Set to 0 if LOW enables the driver (common anode or inverted logic)
+#define ENABLE_ACTIVE_HIGH 0
 
 // Stepper configuration
 #define STEPS_PER_REV 200  // Motor steps per revolution
@@ -27,6 +31,15 @@
 
 // Create stepper object (using DRIVER interface)
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
+
+// Helper functions for driver enable control
+void enableDriver() {
+  digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? HIGH : LOW);
+}
+
+void disableDriver() {
+  digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? LOW : HIGH);
+}
 
 // Communication protocol
 struct Command {
@@ -72,7 +85,7 @@ void setup() {
   
   // Setup enable pin (HIGH = enabled for common cathode)
   pinMode(ENABLE_PIN, OUTPUT);
-  digitalWrite(ENABLE_PIN, HIGH);  // Enable driver (HIGH for common cathode)
+  enableDriver();  // Enable driver respecting polarity
   
   Serial.println("READY");
 }
@@ -159,15 +172,31 @@ void processCommand(char* cmd) {
     case 'E': {  // Emergency stop
       stepper.stop();
       stepper.setCurrentPosition(stepper.currentPosition());
-      digitalWrite(ENABLE_PIN, LOW);  // Disable motor (LOW for common cathode)
+      disableDriver();  // Disable motor respecting polarity
       Serial.println("STOP:OK");
       delay(100);  // Small delay
-      digitalWrite(ENABLE_PIN, HIGH); // Re-enable after stop
+      enableDriver(); // Re-enable after stop
       break;
     }
     
     case 'H': {  // Home (go to position 0)
       moveToAngle(0);
+      break;
+    }
+
+    case 'X': {  // Enable/disable driver: X,1 (enable) or X,0 (disable)
+      // Default to enable if no parameter
+      int en = 1;
+      if (strlen(cmd) >= 3) {
+        en = atoi(cmd + 2) != 0;
+      }
+      if (en) {
+        enableDriver();
+        Serial.println("ENABLE:ON");
+      } else {
+        disableDriver();
+        Serial.println("ENABLE:OFF");
+      }
       break;
     }
   }
