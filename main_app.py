@@ -751,9 +751,13 @@ class HumanTrackingApp(ctk.CTk):
         # Update stats text
         if self.pid_controller:
             metrics = self.pid_controller.get_performance_metrics()
-            stats_text = f"Mean Error: {metrics.get('mean_error', 0):.3f}\n"
-            stats_text += f"Settling Time: {metrics.get('settling_time', -1):.2f}s\n"
-            stats_text += f"Overshoot: {metrics.get('overshoot', 0):.1f}%"
+            mean_err = metrics.get('mean_error', 0.0)
+            settling = metrics.get('settling_time', -1.0)
+            overshoot = metrics.get('overshoot', 0.0)
+            settling_str = f"{settling:.2f}s" if settling is not None and settling >= 0 else "—"
+            stats_text = f"Mean Error: {mean_err:.3f}\n"
+            stats_text += f"Settling Time: {settling_str}\n"
+            stats_text += f"Overshoot: {overshoot:.1f}%"
             self.stats_text.configure(text=stats_text)
     
     def update_logs(self):

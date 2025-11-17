@@ -8,12 +8,12 @@ from .errors import MovementError
 
 
 class MovementController:
-    """Owns movement decisions and sending to Arduino with rate limiting.
+    """Owns movement decisions and sending to Arduino.
 
-    - Uses provided PID controller for output
-    - Applies slew rate limiting and command deadband
-    - Enforces min command interval
-    - Sends via ArduinoController.move_by_delta
+    Refactored for SRP/DRY:
+    - compute_delta: PID + slew limiting (single responsibility)
+    - helper methods: typed config access and independent gates
+    - maybe_send: linear pipeline of simple checks, no nested logic
     """
 
     def __init__(self, pid_controller, arduino_controller, config):
@@ -23,72 +23,91 @@ class MovementController:
         self._last_send_time = 0.0
         # Track last non-zero command sign to prevent rapid ping-pong
         self._last_command_sign = 0
+        # EMA smoothing state
+        self._delta_ema = 0.0
+
+    # --- Config helpers (DRY) ---
+    def _get_float(self, section: str, key: str, default: float) -> float:
+        try:
+            val = self.config.get(section, key)
+            return default if val is None else float(val)
+        except Exception:
+            return default
+
+    def _rules(self):
+        return {
+            'min_interval_ms': self._get_float('arduino', 'min_command_interval_ms', 40.0),
+            'cmd_deadband_deg': self._get_float('arduino', 'command_deadband_deg', 0.2),
+            'sign_flip_guard_deg': self._get_float('arduino', 'sign_flip_guard_deg', 0.0),
+            'delta_alpha': self._get_float('arduino', 'cmd_delta_alpha', 0.5),
+            'moving_hold_speed': self._get_float('arduino', 'moving_hold_speed_deg_per_sec', 0.0),
+            'slew_rate_deg_s': self._get_float('arduino', 'output_slew_rate_deg_per_sec', 25.0),
+            'output_scale_deg': self._get_float('pid', 'output_scale_deg', 1.0),
+        }
+
+    # --- Processing helpers ---
+    @staticmethod
+    def _sign(x: float) -> int:
+        return 1 if x > 0 else (-1 if x < 0 else 0)
+
+    def _smooth_delta(self, delta: float, alpha: float) -> float:
+        sm = alpha * float(delta) + (1.0 - alpha) * float(self._delta_ema)
+        self._delta_ema = float(sm)
+        return sm
 
     def compute_delta(self, measured_x: float, dt: float) -> float:
+        rules = self._rules()
         raw = float(self.pid.update(measured_x, float(dt)))
-        # Determine units of PID output: if output_limits span is small (≤2),
-        # treat raw as normalized and apply output_scale_deg. If span is large,
-        # assume degrees and skip scaling to avoid double-scaling.
-        try:
-            limits = getattr(self.pid, "output_limits", (-1.0, 1.0))
-        except Exception:
-            limits = (-1.0, 1.0)
-        try:
-            output_scale = float(self.config.get('pid', 'output_scale_deg') or 1.0)
-        except Exception:
-            output_scale = 1.0
+        limits = getattr(self.pid, "output_limits", (-1.0, 1.0))
         try:
             span = abs(float(limits[1]) - float(limits[0]))
         except Exception:
             span = 2.0
-        if span <= 2.0:
-            scaled = raw * output_scale
-        else:
-            scaled = raw
-        try:
-            slew = float(self.config.get('arduino', 'output_slew_rate_deg_per_sec'))
-        except Exception:
-            slew = 25.0
-        max_delta = max(0.0, slew * float(dt))
+        scaled = raw * rules['output_scale_deg'] if span <= 2.0 else raw
+        max_delta = max(0.0, rules['slew_rate_deg_s'] * float(dt))
         return float(np.clip(scaled, -max_delta, max_delta))
 
     def maybe_send(self, delta_deg: float) -> MoveCommand:
-        try:
-            min_interval_ms = float(self.config.get('arduino', 'min_command_interval_ms'))
-            cmd_deadband_deg = float(self.config.get('arduino', 'command_deadband_deg'))
-            sign_flip_guard_deg = float(self.config.get('arduino', 'sign_flip_guard_deg') or 0.0)
-        except Exception:
-            min_interval_ms = 40.0
-            cmd_deadband_deg = 0.2
-            sign_flip_guard_deg = 0.0
-
+        rules = self._rules()
         now = time.time()
-        # Suppress tiny commands
-        if abs(delta_deg) < cmd_deadband_deg:
+
+        d = self._smooth_delta(delta_deg, rules['delta_alpha'])
+        if abs(d) < rules['cmd_deadband_deg']:
             return MoveCommand(delta_deg=0.0, sent=False, reason="below_cmd_deadband")
 
-        # Guard against rapid sign flips near center that cause oscillation
-        current_sign = 1 if delta_deg > 0 else (-1 if delta_deg < 0 else 0)
+        cur_sign = self._sign(d)
         if (
-            sign_flip_guard_deg > 0.0
+            rules['sign_flip_guard_deg'] > 0.0
             and self._last_command_sign != 0
-            and current_sign != 0
-            and current_sign != self._last_command_sign
-            and abs(delta_deg) <= sign_flip_guard_deg
+            and cur_sign != 0
+            and cur_sign != self._last_command_sign
+            and abs(d) <= rules['sign_flip_guard_deg']
         ):
             return MoveCommand(delta_deg=0.0, sent=False, reason="sign_flip_guard")
-        if (now - self._last_send_time) * 1000.0 < min_interval_ms:
-            return MoveCommand(delta_deg=delta_deg, sent=False, reason="throttled")
+
+        # Hold tiny corrections while motor is moving fast
+        if rules['moving_hold_speed'] > 0.0:
+            fb = getattr(self.arduino, 'last_feedback', None)
+            speed = float(getattr(fb, 'current_speed', 0.0)) if fb is not None else 0.0
+            if (
+                bool(getattr(self.arduino, 'is_moving', False))
+                and abs(speed) >= rules['moving_hold_speed']
+                and abs(d) <= max(rules['cmd_deadband_deg'] * 2.0, rules['sign_flip_guard_deg'])
+            ):
+                return MoveCommand(delta_deg=0.0, sent=False, reason="moving_fast_hold")
+
+        if (now - self._last_send_time) * 1000.0 < rules['min_interval_ms']:
+            return MoveCommand(delta_deg=d, sent=False, reason="throttled")
 
         if not getattr(self.arduino, "connected", False):
             return MoveCommand(delta_deg=0.0, sent=False, reason="arduino_disconnected")
 
         try:
-            ok = self.arduino.move_by_delta(float(delta_deg))
+            ok = self.arduino.move_by_delta(float(d))
         except Exception as e:
             raise MovementError(f"arduino send failed: {e}")
         if ok:
             self._last_send_time = now
-            self._last_command_sign = current_sign if current_sign != 0 else self._last_command_sign
-            return MoveCommand(delta_deg=float(delta_deg), sent=True, reason="sent")
-        return MoveCommand(delta_deg=float(delta_deg), sent=False, reason="controller_rejected")
+            self._last_command_sign = cur_sign if cur_sign != 0 else self._last_command_sign
+            return MoveCommand(delta_deg=float(d), sent=True, reason="sent")
+        return MoveCommand(delta_deg=float(d), sent=False, reason="controller_rejected")

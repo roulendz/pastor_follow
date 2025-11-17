@@ -239,13 +239,15 @@ class PIDController:
         
         errors = np.array(self.error_history)
         
-        # Find maximum overshoot (minimum error if setpoint is positive)
+        # Overshoot occurs when error crosses the setpoint and has opposite sign.
+        # For positive setpoint, negative error indicates overshoot; magnitude is -min(error).
+        # For negative setpoint, positive error indicates overshoot; magnitude is max(error).
         if self.setpoint > 0:
-            overshoot = -np.min(errors)
+            overshoot_mag = max(0.0, float(-np.min(errors)))
         else:
-            overshoot = np.max(errors)
-        
-        return (overshoot / abs(self.setpoint)) * 100 if self.setpoint != 0 else 0
+            overshoot_mag = max(0.0, float(np.max(errors)))
+
+        return (overshoot_mag / abs(self.setpoint)) * 100 if self.setpoint != 0 else 0
     
     def auto_tune(self, method: str = 'ziegler_nichols'):
         """Auto-tune PID parameters using specified method"""
