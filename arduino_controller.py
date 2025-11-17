@@ -304,6 +304,12 @@ class ArduinoController:
                 if self.serial_port and self.serial_port.is_open:
                     self.serial_port.write(f"{command}\n".encode('utf-8'))
                     self.command_count += 1
+                    # Trace commands sent
+                    if self.feedback_callback:
+                        try:
+                            self.feedback_callback(f"CMD:{command}")
+                        except Exception:
+                            pass
                     
             except queue.Empty:
                 continue
@@ -360,7 +366,13 @@ class ArduinoController:
                 # Acknowledgment of move command
                 parts = line[5:].split(',')
                 if self.feedback_callback:
-                    self.feedback_callback(f"Move command acknowledged: {parts[0]} degrees")
+                    try:
+                        if len(parts) >= 2:
+                            self.feedback_callback(f"Move command acknowledged: {parts[0]} deg, steps={parts[1]}")
+                        else:
+                            self.feedback_callback(f"Move command acknowledged: {parts[0]} deg")
+                    except Exception:
+                        self.feedback_callback(f"Move command acknowledged: {parts[0]} deg")
             
             elif line.startswith('SETTINGS:'):
                 # Settings update acknowledgment
@@ -372,7 +384,14 @@ class ArduinoController:
                 self.errors += 1
                 if self.error_callback:
                     self.error_callback(f"Arduino error: {line[6:]}")
-            
+            elif line.startswith('READY'):
+                if self.feedback_callback:
+                    self.feedback_callback("Arduino READY")
+            else:
+                # Raw unparsed line
+                if self.feedback_callback:
+                    self.feedback_callback(f"RAW:{line}")
+        
         except Exception as e:
             self.errors += 1
             if self.error_callback:
