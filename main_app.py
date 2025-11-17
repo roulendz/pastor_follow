@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import json
+import os
+import argparse
 
 # Import our modules
 from config import Config
@@ -34,8 +36,10 @@ ctk.set_default_color_theme("blue")
 class HumanTrackingApp(ctk.CTk):
     """Main application GUI"""
     
-    def __init__(self):
+    def __init__(self, verbose: bool = False, log_file_path: str = None):
         super().__init__()
+        # Verbose console echo flag
+        self.verbose = bool(verbose)
         
         # Window setup
         self.title("Human Tracking System - Servo Control")
@@ -71,6 +75,30 @@ class HumanTrackingApp(ctk.CTk):
         self.tracking_enabled = False
         self.running = True
         self.recording = False
+
+        # Manual target selection
+        self.manual_target_enabled = False
+        self.manual_target_pos = None  # normalized (x, y)
+        self.current_frame_size = (0, 0)  # (width, height) of displayed frame
+
+        # Session log file (overwrite every session)
+        # Write into the project directory regardless of current working directory
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        self.session_log_path = (
+            log_file_path if isinstance(log_file_path, str) and len(log_file_path) > 0
+            else os.path.join(app_dir, "last_session.log")
+        )
+        try:
+            self.session_log_file = open(self.session_log_path, 'w', encoding='utf-8')
+            # Initial log note
+            self.log(f"Session log started: {self.session_log_path}")
+        except Exception as e:
+            self.session_log_file = None
+            # Surface the error in the GUI log so it's visible
+            try:
+                self.log(f"Failed to open session log file: {e}")
+            except Exception:
+                pass
         
         # Queues for thread communication
         self.frame_display_queue = queue.Queue(maxsize=2)
@@ -105,6 +133,9 @@ class HumanTrackingApp(ctk.CTk):
         # Video display
         self.video_label = ctk.CTkLabel(self.left_panel, text="Video Feed")
         self.video_label.pack(padx=10, pady=10)
+        # Click bindings for manual target control
+        self.video_label.bind("<Button-1>", self.on_video_click)
+        self.video_label.bind("<Button-3>", self.on_video_right_click)
         
         # Control buttons
         self.control_frame = ctk.CTkFrame(self.left_panel)
@@ -459,13 +490,27 @@ class HumanTrackingApp(ctk.CTk):
                         self.log(f"Pose processing error: {e}")
                     
                     # Get target position if tracking is enabled
-                    if self.tracking_enabled and persons:
-                        target_pos = self.pose_detector.get_target_position(
-                            persons,
-                            self.body_part_var.get(),
-                            self.tracking_mode_var.get()
-                        )
-                        
+                    if self.tracking_enabled:
+                        target_pos = None
+
+                        # Manual override: use clicked target if enabled
+                        if self.manual_target_enabled and self.manual_target_pos is not None:
+                            target_pos = (float(self.manual_target_pos[0]), float(self.manual_target_pos[1]))
+                            # Draw marker at manual target
+                            try:
+                                mx = int(target_pos[0] * annotated_frame.shape[1])
+                                my = int(target_pos[1] * annotated_frame.shape[0])
+                                cv2.drawMarker(annotated_frame, (mx, my), (0, 255, 0),
+                                               markerType=cv2.MARKER_CROSS, markerSize=14, thickness=2)
+                            except Exception:
+                                pass
+                        elif persons:
+                            target_pos = self.pose_detector.get_target_position(
+                                persons,
+                                self.body_part_var.get(),
+                                self.tracking_mode_var.get()
+                            )
+                            
                         if target_pos:
                             # Ensure numeric tuple (x, y)
                             try:
@@ -484,21 +529,21 @@ class HumanTrackingApp(ctk.CTk):
                                     # Fallback to raw target on smoothing errors
                                     self.log(f"Smoothing error: {e}")
                             
-                            # Update PID controller
-                            error = float(target_pos[0])  # X position (0-1, 0.5 is center)
-                            output = self.pid_controller.update(error)
+                            # Update PID controller with measured X (setpoint is 0.5)
+                            measured_x = float(target_pos[0])
+                            output = self.pid_controller.update(measured_x)
                             
                             # Send to Arduino
                             if self.arduino.connected:
                                 self.arduino.move_to_angle(output)
                             
-                            # Store for monitoring
-                            self.error_history.append(error - 0.5)
+                            # Store for monitoring (error relative to center)
+                            self.error_history.append(self.pid_controller.setpoint - measured_x)
                             self.output_history.append(output)
                             
                             # Draw tracking info on frame
                             cv2.putText(annotated_frame, 
-                                    f"Target: {error:.3f} | Output: {output:.1f}°",
+                                    f"X: {measured_x:.3f} | Out: {output:.1f}°",
                                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                                     0.7, (0, 255, 255), 2)
                     
@@ -579,6 +624,9 @@ class HumanTrackingApp(ctk.CTk):
         image = Image.fromarray(frame_rgb)
         photo = CTkImage(image, size=(frame.shape[1], frame.shape[0]))
         
+        # Track current displayed size for click normalization
+        self.current_frame_size = (frame.shape[1], frame.shape[0])
+
         # Update label
         self.video_label.configure(image=photo, text="")
         self.video_label.image = photo  # Keep reference
@@ -867,8 +915,23 @@ class HumanTrackingApp(ctk.CTk):
     
     def on_arduino_feedback(self, feedback):
         """Handle Arduino feedback"""
-        # Feedback is already processed in arduino_controller
-        pass
+        try:
+            # Log both high-level objects and raw strings
+            if isinstance(feedback, dict):
+                # Not expected, but guard
+                    self.log(f"Arduino feedback (dict): {feedback}")
+            elif hasattr(feedback, 'raw_data'):
+                fb = feedback
+                self.log(
+                    f"FB current={fb.current_angle:.2f}° target={fb.target_angle:.2f}° "
+                    f"speed={fb.current_speed:.1f} moving={int(fb.is_moving)} ts={fb.timestamp}"
+                )
+            elif isinstance(feedback, str):
+                self.log(feedback)
+            else:
+                self.log(f"Arduino feedback: {feedback}")
+        except Exception as e:
+            self.log(f"Feedback handling error: {e}")
     
     def on_arduino_error(self, error):
         """Handle Arduino error"""
@@ -879,6 +942,19 @@ class HumanTrackingApp(ctk.CTk):
         try:
             self.log_queue.put_nowait(message)
         except queue.Full:
+            pass
+        # Also write to session log file immediately
+        try:
+            if getattr(self, 'session_log_file', None):
+                ts = datetime.now().isoformat(timespec='seconds')
+                self.session_log_file.write(f"[{ts}] {message}\n")
+                self.session_log_file.flush()
+            # Verbose console echo
+            if self.verbose:
+                ts = datetime.now().strftime("%H:%M:%S")
+                print(f"[{ts}] {message}")
+        except Exception:
+            # Non-fatal; ignore file write errors to keep app running
             pass
     
     def save_log(self):
@@ -912,15 +988,59 @@ class HumanTrackingApp(ctk.CTk):
         
         # Save configuration
         self.config.save_config()
+
+        # Close session log file
+        try:
+            if getattr(self, 'session_log_file', None):
+                self.session_log_file.close()
+        except Exception:
+            pass
         
         # Destroy window
         self.destroy()
 
+    def on_video_click(self, event):
+        """Handle left-click on video to set manual target (center on click)"""
+        try:
+            w, h = self.current_frame_size
+            if w <= 0 or h <= 0:
+                return
+            x_norm = max(0.0, min(1.0, event.x / float(w)))
+            y_norm = max(0.0, min(1.0, event.y / float(h)))
+            self.manual_target_pos = (x_norm, y_norm)
+            self.manual_target_enabled = True
+            self.log(f"Manual target set by click: ({x_norm:.3f}, {y_norm:.3f})")
+        except Exception as e:
+            self.log(f"Video click error: {e}")
+
+    def on_video_right_click(self, event):
+        """Handle right-click to clear manual target"""
+        self.manual_target_enabled = False
+        self.manual_target_pos = None
+        self.log("Manual target cleared")
+
 
 def main():
     """Main entry point"""
-    app = HumanTrackingApp()
-    app.mainloop()
+    parser = argparse.ArgumentParser(description="Human Tracking System GUI")
+    parser.add_argument("--verbose", action="store_true", help="Echo logs to console")
+    parser.add_argument("--log-file", type=str, default=None, help="Path to session log file")
+    args = parser.parse_args()
+
+    app = HumanTrackingApp(verbose=args.verbose, log_file_path=args.log_file)
+    try:
+        app.mainloop()
+    except KeyboardInterrupt:
+        # Gracefully close on Ctrl+C without a noisy traceback
+        print("KeyboardInterrupt received; closing application...")
+        try:
+            app.on_closing()
+        except Exception:
+            pass
+        try:
+            app.destroy()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
