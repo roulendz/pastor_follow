@@ -533,14 +533,19 @@ class HumanTrackingApp(ctk.CTk):
         cv2.line(frame, (x_raw_px, 0), (x_raw_px, h), (0, 140, 255), 1)  # orange
         cv2.line(frame, (x_cal_px, 0), (x_cal_px, h), (0, 255, 255), 1)  # yellow
 
-        # Arrow indicating OutΔ direction
-        arrow_len = int(40 * (1 if out_delta >= 0 else -1))
+        # Arrow indicating OutDelta direction (apply motor inversion for display)
+        try:
+            invert_dir = bool(self.config.get('arduino', 'invert_direction'))
+        except Exception:
+            invert_dir = False
+        out_delta_motor = float(out_delta) * (-1 if invert_dir else 1)
+        arrow_len = int(40 * (1 if out_delta_motor >= 0 else -1))
         base_y = int(0.15 * h)
         cv2.arrowedLine(frame, (center_px, base_y), (center_px + arrow_len, base_y), (255, 255, 255), 2, tipLength=0.2)
 
         # Text block
         err = float(self.pid_controller.setpoint) - float(x_cal)
-        dbg = f"Xraw:{x_raw:.3f} Xcal:{x_cal:.3f} Err:{err:.3f} DBn:{center_db_norm:.3f} OutΔ:{out_delta:.2f}°"
+        dbg = f"Xraw:{x_raw:.3f} Xcal:{x_cal:.3f} Err:{err:.3f} DBn:{center_db_norm:.3f} OutDelta:{out_delta_motor:.2f}Degrees"
         cv2.putText(frame, dbg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     
     def setup_log_tab(self):

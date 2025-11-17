@@ -253,11 +253,9 @@ class ArduinoController:
         except Exception:
             delta = float(delta_deg) if isinstance(delta_deg, (int, float)) else 0.0
 
-        # Choose a base angle: prefer last sent angle, else current feedback position
-        base_angle = self.last_sent_angle
-        if base_angle == 0.0 and self.last_cmd_time == 0.0:
-            # No command has been sent yet; fall back to current feedback position
-            base_angle = self.current_position
+        # Choose a base angle from current feedback to avoid target jitter
+        # If feedback is unavailable, fall back to the last sent angle
+        base_angle = self.current_position if self.last_feedback is not None else self.last_sent_angle
 
         target = base_angle + delta
         return self.move_to_angle(target)

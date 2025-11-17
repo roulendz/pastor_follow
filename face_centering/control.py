@@ -21,6 +21,8 @@ class MovementController:
         self.arduino = arduino_controller
         self.config = config
         self._last_send_time = 0.0
+        # Track last non-zero command sign to prevent rapid ping-pong
+        self._last_command_sign = 0
 
     def compute_delta(self, measured_x: float, dt: float) -> float:
         raw = float(self.pid.update(measured_x, float(dt)))
@@ -54,13 +56,27 @@ class MovementController:
         try:
             min_interval_ms = float(self.config.get('arduino', 'min_command_interval_ms'))
             cmd_deadband_deg = float(self.config.get('arduino', 'command_deadband_deg'))
+            sign_flip_guard_deg = float(self.config.get('arduino', 'sign_flip_guard_deg') or 0.0)
         except Exception:
             min_interval_ms = 40.0
             cmd_deadband_deg = 0.2
+            sign_flip_guard_deg = 0.0
 
         now = time.time()
+        # Suppress tiny commands
         if abs(delta_deg) < cmd_deadband_deg:
             return MoveCommand(delta_deg=0.0, sent=False, reason="below_cmd_deadband")
+
+        # Guard against rapid sign flips near center that cause oscillation
+        current_sign = 1 if delta_deg > 0 else (-1 if delta_deg < 0 else 0)
+        if (
+            sign_flip_guard_deg > 0.0
+            and self._last_command_sign != 0
+            and current_sign != 0
+            and current_sign != self._last_command_sign
+            and abs(delta_deg) <= sign_flip_guard_deg
+        ):
+            return MoveCommand(delta_deg=0.0, sent=False, reason="sign_flip_guard")
         if (now - self._last_send_time) * 1000.0 < min_interval_ms:
             return MoveCommand(delta_deg=delta_deg, sent=False, reason="throttled")
 
@@ -73,5 +89,6 @@ class MovementController:
             raise MovementError(f"arduino send failed: {e}")
         if ok:
             self._last_send_time = now
+            self._last_command_sign = current_sign if current_sign != 0 else self._last_command_sign
             return MoveCommand(delta_deg=float(delta_deg), sent=True, reason="sent")
         return MoveCommand(delta_deg=float(delta_deg), sent=False, reason="controller_rejected")

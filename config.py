@@ -53,7 +53,8 @@ class Config:
             "max_acceleration": 40000,
             "feedback_rate": 20,  # Hz
             "min_command_interval_ms": 40,
-            "command_deadband_deg": 0.1,
+            "command_deadband_deg": 0.5,
+            "sign_flip_guard_deg": 2.0,
             "invert_direction": False,
             "output_slew_rate_deg_per_sec": 40,
             "max_deg_per_sec": 40,
@@ -67,10 +68,10 @@ class Config:
             "target_body_part": "nose",  # nose, left_shoulder, right_shoulder, etc.
             "tracking_mode": "center",   # center, largest, closest
             "smoothing_enabled": True,
-            "smoothing_window": 5,
+            "smoothing_window": 7,
             "min_visibility": 0.5,
             "smoothing_alpha": 0.3,
-            "center_deadband_norm": 0.03,
+            "center_deadband_norm": 0.05,
             "focus_on_face": True
         },
         
