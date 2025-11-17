@@ -260,7 +260,7 @@ class HumanTrackingApp(ctk.CTk):
         p_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(p_frame, text="P:", width=30).pack(side="left", padx=5)
         self.p_slider = ctk.CTkSlider(
-            p_frame, from_=0, to=5, number_of_steps=50,
+            p_frame, from_=0, to=10, number_of_steps=100,
             command=self.on_pid_change
         )
         self.p_slider.set(self.config.get('pid', 'kp'))
@@ -273,7 +273,7 @@ class HumanTrackingApp(ctk.CTk):
         i_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(i_frame, text="I:", width=30).pack(side="left", padx=5)
         self.i_slider = ctk.CTkSlider(
-            i_frame, from_=0, to=1, number_of_steps=50,
+            i_frame, from_=0, to=2, number_of_steps=100,
             command=self.on_pid_change
         )
         self.i_slider.set(self.config.get('pid', 'ki'))
@@ -286,7 +286,7 @@ class HumanTrackingApp(ctk.CTk):
         d_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(d_frame, text="D:", width=30).pack(side="left", padx=5)
         self.d_slider = ctk.CTkSlider(
-            d_frame, from_=0, to=2, number_of_steps=50,
+            d_frame, from_=0, to=5, number_of_steps=100,
             command=self.on_pid_change
         )
         self.d_slider.set(self.config.get('pid', 'kd'))
@@ -322,6 +322,37 @@ class HumanTrackingApp(ctk.CTk):
             command=self.apply_motor_settings
         )
         self.apply_motor_btn.pack(pady=10)
+
+        # Command throttling (Deadband & Min Interval)
+        throttle_frame = ctk.CTkFrame(self.pid_tab)
+        throttle_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(throttle_frame, text="Command Throttling", font=("Arial", 14, "bold")).pack()
+
+        # Deadband slider
+        db_frame = ctk.CTkFrame(throttle_frame)
+        db_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(db_frame, text="Deadband (deg):", width=140).pack(side="left", padx=5)
+        self.deadband_slider = ctk.CTkSlider(
+            db_frame, from_=0.0, to=0.50, number_of_steps=50,
+            command=self.on_deadband_change
+        )
+        self.deadband_slider.set(self.config.get('arduino', 'command_deadband_deg'))
+        self.deadband_value = ctk.CTkLabel(db_frame, text=f"{self.config.get('arduino', 'command_deadband_deg'):.3f}")
+        self.deadband_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.deadband_value.pack(side="left", padx=5)
+
+        # Min command interval slider
+        mi_frame = ctk.CTkFrame(throttle_frame)
+        mi_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(mi_frame, text="Min Cmd Interval (ms):", width=180).pack(side="left", padx=5)
+        self.min_interval_slider = ctk.CTkSlider(
+            mi_frame, from_=10, to=100, number_of_steps=90,
+            command=self.on_min_interval_change
+        )
+        self.min_interval_slider.set(self.config.get('arduino', 'min_command_interval_ms'))
+        self.min_interval_value = ctk.CTkLabel(mi_frame, text=f"{self.config.get('arduino', 'min_command_interval_ms'):.0f}")
+        self.min_interval_slider.pack(side="left", fill="x", expand=True, padx=5)
+        self.min_interval_value.pack(side="left", padx=5)
         
         # Auto-tune options
         autotune_frame = ctk.CTkFrame(self.pid_tab)
@@ -879,12 +910,36 @@ class HumanTrackingApp(ctk.CTk):
                     self.pid_controller.kd
                 )
                 self.log("Motor settings applied")
-            
+
             # Update config
             self.config.set('arduino', 'max_speed', max_speed)
             self.config.set('arduino', 'max_acceleration', max_accel)
         except ValueError:
             messagebox.showerror("Error", "Invalid motor settings values")
+
+    def on_deadband_change(self, value):
+        """Handle deadband slider changes"""
+        try:
+            db = float(value)
+        except Exception:
+            return
+        self.deadband_value.configure(text=f"{db:.3f}")
+        # Update controller and config immediately
+        self.arduino.cmd_deadband_deg = db
+        self.config.set('arduino', 'command_deadband_deg', db)
+        self.log(f"Deadband set to {db:.3f}°")
+
+    def on_min_interval_change(self, value):
+        """Handle min command interval slider changes"""
+        try:
+            mi = float(value)
+        except Exception:
+            return
+        self.min_interval_value.configure(text=f"{mi:.0f}")
+        # Update controller and config immediately
+        self.arduino.min_cmd_interval_ms = mi
+        self.config.set('arduino', 'min_command_interval_ms', mi)
+        self.log(f"Min command interval set to {mi:.0f} ms")
     
     def toggle_adaptive_pid(self):
         """Toggle adaptive PID"""
