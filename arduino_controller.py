@@ -89,6 +89,8 @@ class ArduinoController:
         self.last_sent_angle = 0.0
         self.cmd_skips_deadband = 0
         self.cmd_skips_interval = 0
+        # Actual write timing (used for logging and hard enforcement)
+        self.last_write_time = 0.0
     
     @staticmethod
     def list_devices() -> List[ArduinoDevice]:
@@ -387,17 +389,27 @@ class ArduinoController:
                 command = self.command_queue.get(timeout=0.1)
                 
                 if self.serial_port and self.serial_port.is_open:
+                    # Enforce minimum interval between writes regardless of enqueue rate
+                    now = time.time()
+                    dt_write_ms = (now - self.last_write_time) * 1000.0
+                    min_ms = float(self.min_cmd_interval_ms or 0.0)
+                    if min_ms > 0.0 and dt_write_ms < min_ms:
+                        time.sleep((min_ms - dt_write_ms) / 1000.0)
+                        now = time.time()
+                        dt_write_ms = (now - self.last_write_time) * 1000.0
+
                     self.serial_port.write(f"{command}\n".encode('utf-8'))
                     self.command_count += 1
-                    # Trace commands sent
+                    self.last_write_time = now
+                    # Trace commands sent (true write interval)
                     if self.feedback_callback:
                         try:
-                            # Include queue size and interval info
-                            dt_ms = (time.time() - self.last_cmd_time) * 1000.0
-                            self.feedback_callback(f"CMD:{command} | dt_ms={dt_ms:.1f} queue={self.command_queue.qsize()}")
+                            self.feedback_callback(
+                                f"CMD:{command} | dt_write_ms={dt_write_ms:.1f} queue={self.command_queue.qsize()}"
+                            )
                         except Exception:
                             pass
-                    
+                
             except queue.Empty:
                 continue
             except Exception as e:

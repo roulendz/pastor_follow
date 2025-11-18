@@ -25,6 +25,8 @@ class MovementController:
         self._last_command_sign = 0
         # EMA smoothing state
         self._delta_ema = 0.0
+        # Accumulate deltas between allowed send windows to avoid command spam
+        self._pending_delta = 0.0
 
     # --- Config helpers (DRY) ---
     def _get_float(self, section: str, key: str, default: float) -> float:
@@ -71,17 +73,22 @@ class MovementController:
         rules = self._rules()
         now = time.time()
 
+        # Smooth and accumulate pending correction
         d = self._smooth_delta(delta_deg, rules['delta_alpha'])
-        if abs(d) < rules['cmd_deadband_deg']:
+        self._pending_delta += float(d)
+        p = float(self._pending_delta)
+
+        # Gate on command deadband using the accumulated correction
+        if abs(p) < rules['cmd_deadband_deg']:
             return MoveCommand(delta_deg=0.0, sent=False, reason="below_cmd_deadband")
 
-        cur_sign = self._sign(d)
+        cur_sign = self._sign(p)
         if (
             rules['sign_flip_guard_deg'] > 0.0
             and self._last_command_sign != 0
             and cur_sign != 0
             and cur_sign != self._last_command_sign
-            and abs(d) <= rules['sign_flip_guard_deg']
+            and abs(p) <= rules['sign_flip_guard_deg']
         ):
             return MoveCommand(delta_deg=0.0, sent=False, reason="sign_flip_guard")
 
@@ -92,22 +99,24 @@ class MovementController:
             if (
                 bool(getattr(self.arduino, 'is_moving', False))
                 and abs(speed) >= rules['moving_hold_speed']
-                and abs(d) <= max(rules['cmd_deadband_deg'] * 2.0, rules['sign_flip_guard_deg'])
+                and abs(p) <= max(rules['cmd_deadband_deg'] * 2.0, rules['sign_flip_guard_deg'])
             ):
                 return MoveCommand(delta_deg=0.0, sent=False, reason="moving_fast_hold")
 
         if (now - self._last_send_time) * 1000.0 < rules['min_interval_ms']:
-            return MoveCommand(delta_deg=d, sent=False, reason="throttled")
+            return MoveCommand(delta_deg=p, sent=False, reason="throttled")
 
         if not getattr(self.arduino, "connected", False):
             return MoveCommand(delta_deg=0.0, sent=False, reason="arduino_disconnected")
 
         try:
-            ok = self.arduino.move_by_delta(float(d))
+            ok = self.arduino.move_by_delta(p)
         except Exception as e:
             raise MovementError(f"arduino send failed: {e}")
         if ok:
             self._last_send_time = now
             self._last_command_sign = cur_sign if cur_sign != 0 else self._last_command_sign
-            return MoveCommand(delta_deg=float(d), sent=True, reason="sent")
-        return MoveCommand(delta_deg=float(d), sent=False, reason="controller_rejected")
+            # Reset accumulated correction after a successful send
+            self._pending_delta = 0.0
+            return MoveCommand(delta_deg=p, sent=True, reason="sent")
+        return MoveCommand(delta_deg=p, sent=False, reason="controller_rejected")

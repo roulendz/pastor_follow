@@ -41,7 +41,9 @@
         "max_deg_per_sec": 25,
         "steps_per_rev": 200,
         "gear_ratio": 180,
-        "microsteps": 8
+        "microsteps": 8,
+        "cmd_delta_alpha": 0.5,
+        "moving_hold_speed_deg_per_sec": 180.0
     },
     "tracking": {
         "target_body_part": "nose",
