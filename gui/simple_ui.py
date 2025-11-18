@@ -52,7 +52,9 @@ class SimpleTrackingApp(ctk.CTk):
             'width': self.cfg.get('video', 'width'),
             'height': self.cfg.get('video', 'height'),
             'fps': self.cfg.get('video', 'fps'),
-            'buffer_size': 1,
+            'backend': self.cfg.get('video', 'backend'),
+            'fourcc': self.cfg.get('video', 'fourcc'),
+            'buffersize': self.cfg.get('video', 'buffersize'),
         })
         self.arduino = ArduinoController(self.cfg.get('arduino'))
         # Establish connection so immediate OutDelta commands move the motor
@@ -235,7 +237,7 @@ class SimpleTrackingApp(ctk.CTk):
             self._last_loop_ts = now
 
             # Video frame
-            ret, frame = self.video.get_frame(timeout=0.01)
+            ret, frame = self.video.get_frame(timeout=0.05)
             if ret and frame is not None:
                 # Queue frame and status for UI-thread rendering
                 try:
@@ -244,9 +246,11 @@ class SimpleTrackingApp(ctk.CTk):
                     fps_meas = float(status.get('fps_measured', 0.0))
                     connected = bool(status.get('connected', False))
                     backend = str(status.get('backend', ''))
+                    drops = int(status.get('drops_1s', 0))
+                    fails = int(status.get('fail_count', 0))
                     if self._ui_queue.full():
                         _ = self._ui_queue.get_nowait()
-                    self._ui_queue.put_nowait({'frame': frame, 'w': w, 'h': h, 'fps': fps_meas, 'connected': connected, 'backend': backend})
+                    self._ui_queue.put_nowait({'frame': frame, 'w': w, 'h': h, 'fps': fps_meas, 'connected': connected, 'backend': backend, 'drops': drops, 'fails': fails})
                 except Exception as e:
                     self.logger.log_failure(f"ui_queue_error:{e}")
             else:
@@ -300,8 +304,10 @@ class SimpleTrackingApp(ctk.CTk):
                     fps_meas = float(item.get('fps', 0.0))
                     connected = bool(item.get('connected', False))
                     backend = str(item.get('backend', ''))
+                    drops = int(item.get('drops', 0))
+                    fails = int(item.get('fails', 0))
                     if connected:
-                        self.lbl_video.configure(text=f"Video: {backend} {w}x{h} @ {fps_meas:.1f}fps")
+                        self.lbl_video.configure(text=f"Video: {backend} {w}x{h} @ {fps_meas:.1f}fps | drops:{drops} | fails:{fails}")
                     else:
                         self.lbl_video.configure(text=f"Video: disconnected (showing synthetic)")
                 except Exception as e:

@@ -132,19 +132,21 @@ class VideoCapture:
                 except Exception:
                     pass
             else:
-                # Count drop and optionally hold last frame briefly to reduce blinking
+                # Count drop and prefer holding the last good frame when the device is still opened
                 self._fail_count += 1
                 self._drops_1s += 1
-                hold_ok = (self._last_frame is not None) and ((now - self._last_frame_ts) * 1000.0 < self.dropout_hold_ms)
+                connected_now = bool(self.cap and self.cap.isOpened())
+                hold_ok = (self._last_frame is not None) and (
+                    connected_now or ((now - self._last_frame_ts) * 1000.0 < self.dropout_hold_ms)
+                )
                 try:
-                    if hold_ok and self._queue:
+                    if self._queue:
                         if self._queue.full():
                             _ = self._queue.get_nowait()
-                        self._queue.put_nowait(self._last_frame)
-                    elif self._queue:
-                        if self._queue.full():
-                            _ = self._queue.get_nowait()
-                        self._queue.put_nowait(self._synthetic_frame())
+                        if hold_ok:
+                            self._queue.put_nowait(self._last_frame)
+                        else:
+                            self._queue.put_nowait(self._synthetic_frame())
                 except Exception:
                     pass
 
@@ -206,15 +208,17 @@ class VideoCapture:
         return frame
 
     def get_frame(self, timeout: float = 0.05) -> Tuple[bool, Optional[object]]:
+        # Prefer returning the last good frame on short gaps to avoid synthetic flashes
         if not self._running:
             return True, self._synthetic_frame()
         try:
-            if self._queue:
-                frame = self._queue.get(timeout=timeout)
-            else:
-                frame = None
-            return True, (frame if frame is not None else self._synthetic_frame())
+            frame = self._queue.get(timeout=timeout) if self._queue else None
+            if frame is None:
+                return True, (self._last_frame if self._last_frame is not None else self._synthetic_frame())
+            return True, frame
         except Exception:
+            if self._last_frame is not None:
+                return True, self._last_frame
             return True, self._synthetic_frame()
 
     def get_status(self) -> Dict[str, Any]:
