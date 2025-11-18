@@ -53,6 +53,7 @@ class Config:
                 'range_deg': 180,     # or 360
                 'center_deg': 90,     # 180-range -> 90, 360-range -> 180
                 'home_anim_ms': 250,  # smooth animation duration back to center
+                'slider_mode': 'position',
             },
         }
 

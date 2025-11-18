@@ -67,6 +67,28 @@ class ArduinoController:
             self.is_moving = abs(delta_deg) > 0.0
             return True
 
+    def move_to_abs(self, angle_deg: float) -> bool:
+        """Move to an absolute stage angle in degrees.
+
+        Sends an 'M,<angle>' command if serial is available; otherwise updates
+        the stubbed position directly. Clamps to [-180, 180] to match firmware.
+        """
+        # Clamp to stage limits
+        target_angle = max(-180.0, min(180.0, float(angle_deg)))
+        self.current_position = target_angle
+        if self._ser:
+            try:
+                cmd = f"M,{target_angle}\n".encode('utf-8')
+                self._ser.write(cmd)
+                self.is_moving = True
+                return True
+            except Exception:
+                return False
+        else:
+            # Stub mode: emulate movement immediately
+            self.is_moving = True
+            return True
+
     def get_feedback(self, timeout: float = 0.0) -> Optional[Feedback]:
         if self._ser:
             try:

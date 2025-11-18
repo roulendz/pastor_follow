@@ -94,6 +94,8 @@ class SimpleTrackingApp(ctk.CTk):
         # Control range and center
         self.range_deg = int(self.cfg.get('control', 'range_deg') or 180)
         self.center_deg = int(self.cfg.get('control', 'center_deg') or (90 if self.range_deg == 180 else 180))
+        # Slider mode: 'position' for absolute angle, 'velocity' for speed-based control
+        self.slider_mode = str(self.cfg.get('control', 'slider_mode') or 'velocity')
 
         self.lbl_offset = ctk.CTkLabel(self, text=f"Offset: 0.00°", font=("Arial", 16))
         self.lbl_offset.grid(row=0, column=0, sticky="w", padx=10, pady=10)
@@ -142,7 +144,13 @@ class SimpleTrackingApp(ctk.CTk):
         # Map absolute degree to normalized [-1,1] around center
         norm = map_deg_to_norm(deg_abs, self.center_deg, self.range_deg)
         try:
-            self.motion.set_user_input(norm)
+            if self.slider_mode == 'position':
+                # Send absolute stage angle to Arduino and neutralize motion controller
+                self.arduino.move_to_abs(deg_abs)
+                self.motion.set_user_input(0.0)
+            else:
+                # Velocity mode: drive motion controller from normalized input
+                self.motion.set_user_input(norm)
             self.lbl_offset.configure(text=f"Offset: {offset:.2f}°")
         except Exception as e:
             self.logger.log_failure(f"slider_input_error:{e}")
@@ -156,6 +164,12 @@ class SimpleTrackingApp(ctk.CTk):
             self.btn_home.configure(state="disabled", text="HOMING…")
         except Exception:
             pass
+        # In position mode, issue absolute move to center immediately
+        if self.slider_mode == 'position':
+            try:
+                self.arduino.move_to_abs(self.center_deg)
+            except Exception as e:
+                self.logger.log_failure(f"home_move_error:{e}")
         # Animate slider back to center
         duration = int(self.cfg.get('control', 'home_anim_ms') or 250)
         steps = plan_center_animation_steps(self._last_slider_abs, self.center_deg, duration_ms=duration)
@@ -177,7 +191,11 @@ class SimpleTrackingApp(ctk.CTk):
                 self.slider.set(offset)
                 # Update controller input live during animation
                 norm = map_deg_to_norm(deg, self.center_deg, self.range_deg)
-                self.motion.set_user_input(norm)
+                if self.slider_mode == 'position':
+                    # In position mode, motion controller is neutralized; Arduino already moving
+                    pass
+                else:
+                    self.motion.set_user_input(norm)
                 self.lbl_offset.configure(text=f"Offset: {offset:.2f}°")
             except Exception as e:
                 self.logger.log_failure(f"home_anim_error:{e}")
@@ -218,11 +236,12 @@ class SimpleTrackingApp(ctk.CTk):
             angle = float(fb.current_angle) if fb else float(self.arduino.current_position or 0.0)
             speed = float(fb.current_speed) if fb else 0.0
 
-            # Motion update → send delta
+            # Motion update → send delta (velocity mode only)
             try:
-                delta = float(self.motion.update(dt_s=dt, motor_angle_deg=angle, motor_speed_deg_s=speed))
-                if abs(delta) > 0.0:
-                    self.arduino.move_by_delta(delta)
+                if self.slider_mode != 'position':
+                    delta = float(self.motion.update(dt_s=dt, motor_angle_deg=angle, motor_speed_deg_s=speed))
+                    if abs(delta) > 0.0:
+                        self.arduino.move_by_delta(delta)
             except Exception as e:
                 self.logger.log_failure(f"motion_update_error:{e}")
 
