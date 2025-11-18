@@ -32,15 +32,17 @@ class Config:
                 'output_scale_deg': 60.0,
             },
             'motion': {
-                'max_speed_deg_s': 60.0,
+                # Stage max velocity: 25°/s per PDV PT-GD201 spec
+                'max_speed_deg_s': 25.0,
                 'curve_exponent': 1.6,
                 'deadzone_norm': 0.05,
                 'ease_tau_s': 0.2,
-                'max_accel_deg_s2': 240.0,
+                'max_accel_deg_s2': 200.0,
                 'auto_return_enabled': True,
                 'return_idle_ms': 120,
-                'return_speed_deg_s': 40.0,
-                'min_command_deg': 0.02,
+                'return_speed_deg_s': 20.0,
+                # Stage resolution is ~0.01°/full step (180:1 worm, 1.8° motor)
+                'min_command_deg': 0.01,
             },
             'tracking': {
                 'slow_threshold_deg_s': 1.0,

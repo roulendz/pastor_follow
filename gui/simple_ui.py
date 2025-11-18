@@ -95,11 +95,13 @@ class SimpleTrackingApp(ctk.CTk):
         self.range_deg = int(self.cfg.get('control', 'range_deg') or 180)
         self.center_deg = int(self.cfg.get('control', 'center_deg') or (90 if self.range_deg == 180 else 180))
 
-        self.lbl_offset = ctk.CTkLabel(self, text=f"Slider: {self.center_deg:.2f}°", font=("Arial", 16))
+        self.lbl_offset = ctk.CTkLabel(self, text=f"Offset: 0.00°", font=("Arial", 16))
         self.lbl_offset.grid(row=0, column=0, sticky="w", padx=10, pady=10)
-        self.slider = ctk.CTkSlider(self, from_=0.0, to=float(self.range_deg), width=300, command=self._on_slider)
+        # Slider shows offset degrees relative to center: [-range/2, +range/2]
+        self.slider = ctk.CTkSlider(self, from_=-float(self.range_deg)/2.0, to=float(self.range_deg)/2.0, width=300, command=self._on_slider)
         self.slider.grid(row=0, column=1, padx=10, pady=10)
-        self.slider.set(float(self.center_deg))
+        # Center is 0 offset
+        self.slider.set(0.0)
 
         # HOME button
         self.btn_home = ctk.CTkButton(self, text="HOME", command=self._on_home)
@@ -112,7 +114,9 @@ class SimpleTrackingApp(ctk.CTk):
         self.lbl_video = ctk.CTkLabel(self, text="Video: init", font=("Arial", 12))
         self.lbl_video.grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=6)
 
-        self._last_slider = 0.0
+        # Track both offset and absolute degrees
+        self._last_slider_offset = 0.0
+        self._last_slider_abs = float(self.center_deg)
         self._running = True
         self._last_loop_ts = time.perf_counter()
         self._fps_ts = time.perf_counter()
@@ -130,13 +134,16 @@ class SimpleTrackingApp(ctk.CTk):
         pass
 
     def _on_slider(self, fVal: float):
-        # Map slider [0,range] to normalized [-1,1] around center and feed controller
-        deg = float(fVal)
-        self._last_slider = deg
-        norm = map_deg_to_norm(deg, self.center_deg, self.range_deg)
+        # Slider now outputs offset degrees relative to center: [-range/2, +range/2]
+        offset = float(fVal)
+        self._last_slider_offset = offset
+        deg_abs = float(self.center_deg) + offset
+        self._last_slider_abs = deg_abs
+        # Map absolute degree to normalized [-1,1] around center
+        norm = map_deg_to_norm(deg_abs, self.center_deg, self.range_deg)
         try:
             self.motion.set_user_input(norm)
-            self.lbl_offset.configure(text=f"Slider: {deg:.2f}°")
+            self.lbl_offset.configure(text=f"Offset: {offset:.2f}°")
         except Exception as e:
             self.logger.log_failure(f"slider_input_error:{e}")
 
@@ -151,10 +158,12 @@ class SimpleTrackingApp(ctk.CTk):
             pass
         # Animate slider back to center
         duration = int(self.cfg.get('control', 'home_anim_ms') or 250)
-        steps = plan_center_animation_steps(self._last_slider, self.center_deg, duration_ms=duration)
+        steps = plan_center_animation_steps(self._last_slider_abs, self.center_deg, duration_ms=duration)
         def _step(i=0):
             if i >= len(steps):
-                self._last_slider = float(self.center_deg)
+                # Reset last slider tracking to center
+                self._last_slider_offset = 0.0
+                self._last_slider_abs = float(self.center_deg)
                 try:
                     self.btn_home.configure(state="normal", text="HOME")
                 except Exception:
@@ -163,11 +172,13 @@ class SimpleTrackingApp(ctk.CTk):
                 return
             deg = steps[i]
             try:
-                self.slider.set(deg)
+                # Convert absolute step to offset for the UI slider
+                offset = float(deg) - float(self.center_deg)
+                self.slider.set(offset)
                 # Update controller input live during animation
                 norm = map_deg_to_norm(deg, self.center_deg, self.range_deg)
                 self.motion.set_user_input(norm)
-                self.lbl_offset.configure(text=f"Slider: {deg:.2f}°")
+                self.lbl_offset.configure(text=f"Offset: {offset:.2f}°")
             except Exception as e:
                 self.logger.log_failure(f"home_anim_error:{e}")
             self.after(max(1, int(duration / max(1, len(steps)))), lambda: _step(i + 1))
