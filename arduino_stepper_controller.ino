@@ -1,145 +1,200 @@
 /**
- * Arduino Stepper Motor Controller with DM542 Driver
- * Features: PID control, position feedback, serial communication
- * 
+ * @file arduino_stepper_controller.ino
+ * @brief Arduino Stepper Motor Controller for Pastor Follow System.
+ *
+ * This sketch controls a stepper motor using the AccelStepper library,
+ * designed for precise angular positioning in a pastor follow system.
+ * It communicates via serial interface, accepting commands for movement,
+ * settings adjustment, and status queries.
+ *
  * Hardware Connections:
- * D2 -> DIR+ (DM542)
- * D3 -> PUL+ (DM542) - Must be PWM capable
- * D4 -> ENA+ (DM542)
- * Common cathode: Arduino GND -> DIR-, PUL-, ENA-
- * 
- * Note: This uses common cathode configuration where all negative
- * terminals connect to GND and Arduino drives the positive terminals
+ * D2 -> DIR+ (DM542 Driver Direction Pin)
+ * D3 -> PUL+ (DM542 Driver Pulse Pin - Must be PWM capable)
+ * D4 -> ENA+ (DM542 Driver Enable Pin)
+ *
+ * Common Cathode Wiring:
+ * Arduino GND -> DM542 DIR-, PUL-, ENA-
+ *
+ * @author Your Name/Organization
+ * @date YYYY-MM-DD
+ * @version 1.0.0
+ * @license MIT License (or appropriate license)
  */
 
 #include <AccelStepper.h>
 
-// Pin definitions (matching your hardware layout)
-#define DIR_PIN 2      // D2 -> DIR+ 
-#define STEP_PIN 3     // D3 -> PUL+ (PWM capable pin)
-#define ENABLE_PIN 4   // D4 -> ENA+
+// Pin definitions for stepper motor control
+#define DIR_PIN 2      // Digital pin connected to the DIR+ (Direction) pin of the stepper driver
+#define STEP_PIN 3     // Digital pin connected to the PUL+ (Pulse/Step) pin of the stepper driver (must be PWM capable)
+#define ENABLE_PIN 4   // Digital pin connected to the ENA+ (Enable) pin of the stepper driver
+
 // Enable polarity configuration:
-// Set to 1 if HIGH enables the driver (common cathode typical)
-// Set to 0 if LOW enables the driver (common anode or inverted logic)
+// Set to 1 if HIGH voltage enables the driver (typical for common cathode wiring)
+// Set to 0 if LOW voltage enables the driver (for common anode or inverted logic)
 #define ENABLE_ACTIVE_HIGH 0
 
-// Stepper configuration
-#define STEPS_PER_REV 200  // Motor steps per revolution
-#define GEAR_RATIO 180     // 180:1 gear ratio
-#define MICROSTEPS 8       // DM542 microstepping setting
-#define TOTAL_STEPS_PER_REV ( (long)STEPS_PER_REV * GEAR_RATIO * MICROSTEPS)
+// Stepper motor and driver configuration parameters
+#define STEPS_PER_REV 200  // Number of full steps per revolution of the motor (e.g., 1.8 degree/step motor has 200 steps/rev)
+#define GEAR_RATIO 180     // Gear ratio of the gearbox attached to the motor (e.g., 180:1)
+#define MICROSTEPS 8       // Microstepping setting on the DM542 driver (e.g., 8 for 1/8 microstepping)
+#define TOTAL_STEPS_PER_REV ( (long)STEPS_PER_REV * GEAR_RATIO * MICROSTEPS) // Total microsteps for one full revolution of the output shaft
 
-// Create stepper object (using DRIVER interface)
+// Create an instance of the AccelStepper library for controlling the stepper motor.
+// AccelStepper::DRIVER specifies that a stepper driver (like DM542) is used,
+// where direction and step signals are separate.
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 
-// Helper functions for driver enable control
+// Helper function to enable the stepper motor driver.
+// The actual HIGH/LOW state depends on the ENABLE_ACTIVE_HIGH definition.
 void enableDriver() {
   digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? HIGH : LOW);
 }
 
+// Helper function to disable the stepper motor driver.
+// This typically cuts power to the motor, allowing it to be moved manually or to save power.
 void disableDriver() {
   digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? LOW : HIGH);
 }
 
+// Offset for command data in the serial input string.
+// Commands are expected in the format "C,data", where 'C' is the command type
+// and 'data' is the argument. The offset skips the command type and comma.
 #define COMMAND_DATA_OFFSET 2
 
-// Communication protocol
+// Structure to hold parsed command information.
 struct Command {
-  char type;  // 'M' for move, 'S' for settings, 'R' for reset, 'Q' for query
-  float value1;
-  float value2;
-  float value3;
+  char type;  // Type of command: 'M' (move), 'S' (settings), 'R' (reset), 'Q' (query), etc.
+  char* args; // Pointer to the arguments string following the command type (e.g., "10.5,20.0")
 };
 
+// Structure to hold feedback data sent back to the host system.
 struct Feedback {
-  long currentPosition;
-  float currentSpeed;
-  bool isMoving;
-  long targetPosition;
-  unsigned long timestamp;
+  long currentPosition;   // Current position of the stepper motor in steps.
+  float currentSpeed;     // Current speed of the stepper motor in steps/second.
+  bool isMoving;          // True if the motor is currently moving, false otherwise.
+  long targetPosition;    // The target position the motor is moving towards in steps.
+  unsigned long timestamp; // Timestamp when the feedback was generated (in milliseconds since Arduino startup).
 };
 
-// PID parameters (will be set from PC)
-// Note: These PID variables are currently placeholders.
-// AccelStepper library handles its own motion profiles and does not directly use these for a custom PID loop.
-float maxSpeed = 25000.0; // Corresponds to 25 deg/s stage speed with 10 microsteps
-float maxAccel = 12500.0; // Half of maxSpeed for smooth acceleration
-float pidP = 1.0;
-float pidI = 0.0;
-float pidD = 0.1;
+// PID parameters (currently placeholders, as AccelStepper handles motion profiles internally).
+// These variables are kept for potential future custom PID loop implementation or
+// for passing to a higher-level control system.
+float maxSpeed = 25000.0; // Maximum speed setting for the stepper motor in steps/second.
+                          // Corresponds to 25 deg/s stage speed with 10 microsteps.
+float maxAccel = 12500.0; // Maximum acceleration setting for the stepper motor in steps/second^2.
+                          // Typically set to half of maxSpeed for smooth acceleration/deceleration.
+float pidP = 1.0;         // Proportional gain for a PID controller (if implemented).
+float pidI = 0.0;         // Integral gain for a PID controller (if implemented).
+float pidD = 0.1;         // Derivative gain for a PID controller (if implemented).
 
-// Variables
-long targetPosition = 0;
-long lastPosition = 0;
-unsigned long lastFeedbackTime = 0;
-const unsigned long FEEDBACK_INTERVAL = 20;  // Send feedback every 20ms (50Hz)
+// Global variables for tracking motor state and feedback timing.
+long targetPosition = 0; // The desired target position in steps.
+long lastPosition = 0;   // Stores the last known position for speed calculation or other purposes.
+unsigned long lastFeedbackTime = 0; // Timestamp of the last feedback sent.
+const unsigned long FEEDBACK_INTERVAL = 20;  // Interval in milliseconds for sending periodic feedback (e.g., 20ms for 50Hz).
 
-// Buffer for serial communication
-char inputBuffer[32];
-int bufferIndex = 0;
+// Buffer for incoming serial data.
+char inputBuffer[32]; // Character array to store incoming serial commands.
+int bufferIndex = 0;  // Current index in the inputBuffer.
 
-struct Command {
-  char type;
-  char* args;
-};
-
-// Function to parse commands from serial input
+// Function to parse a raw command string received via serial.
+// It extracts the command type and its arguments.
 Command parseCommand(char* commandString) {
   Command cmd;
-  cmd.type = '\0'; // Initialize with null character
-  cmd.args = nullptr; // Initialize with null pointer
+  cmd.type = '\0'; // Initialize command type to null character.
+  cmd.args = nullptr; // Initialize arguments pointer to null.
 
+  // Validate the input command string.
   if (commandString == nullptr || strlen(commandString) == 0) {
     Serial.println("ERROR: Empty command string");
-    return cmd;
+    return cmd; // Return an empty command struct on error.
   }
 
-  cmd.type = commandString[0];
+  cmd.type = commandString[0]; // The first character is the command type.
+  // If there are characters beyond the command type and the comma separator,
+  // set args to point to the beginning of the arguments string.
   if (strlen(commandString) > COMMAND_DATA_OFFSET) {
     cmd.args = commandString + COMMAND_DATA_OFFSET;
   }
-  return cmd;
+  return cmd; // Return the parsed command.
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial.setTimeout(10);
+  Serial.begin(115200); // Initialize serial communication at 115200 baud rate.
+  Serial.setTimeout(10); // Set serial read timeout to 10 milliseconds.
   
-  // Configure stepper
-  stepper.setMaxSpeed(maxSpeed);
-  stepper.setAcceleration(maxAccel);
-  stepper.setCurrentPosition(0);
+  // Configure the AccelStepper library with initial motor parameters.
+  stepper.setMaxSpeed(maxSpeed);       // Set the maximum speed for the stepper motor.
+  stepper.setAcceleration(maxAccel);   // Set the acceleration rate for the stepper motor.
+  stepper.setCurrentPosition(0);       // Initialize the current position of the stepper to 0.
   
-  // Setup enable pin (HIGH = enabled for common cathode)
-  pinMode(ENABLE_PIN, OUTPUT);
-  enableDriver();  // Enable driver respecting polarity
+  // Configure the enable pin as an output and enable the driver.
+  pinMode(ENABLE_PIN, OUTPUT); // Set the ENABLE_PIN as an output.
+  enableDriver();              // Call helper function to enable the stepper driver.
   
+  currentMotorState = IDLE; // Initialize motor state to IDLE
+  
+  // Print header for feedback data and a ready message to the serial monitor.
   Serial.println("FB_HEADER:currentAngle,targetAngle,speed,isRunning,timestamp");
   Serial.println("READY");
 }
 
 void loop() {
-  stepper.run(); // This must always be called to make the stepper move
+  // State machine for motor control
+  switch (currentMotorState) {
+    case IDLE:
+      // Motor is idle, waiting for commands
+      stepper.run(); // Keep AccelStepper running to handle potential position updates even when idle
+      break;
+    case MOVING:
+      stepper.run(); // Continue moving
+      if (!stepper.isRunning()) {
+        currentMotorState = IDLE; // Transition to IDLE when movement completes
+      }
+      break;
+    case STOPPED:
+      // Motor is stopped, possibly due to emergency stop or error
+      // No action needed here, waiting for a new command to clear the stop
+      break;
+    case HOMING:
+      // Homing sequence (to be implemented)
+      stepper.run();
+      // For now, assume homing completes quickly and transitions to IDLE
+      // In a real scenario, this would involve limit switches and more complex logic
+      if (!stepper.isRunning()) {
+        currentMotorState = IDLE;
+      }
+      break;
+    case ERROR:
+      // Handle error state (e.g., log error, wait for reset command)
+      disableDriver(); // Ensure driver is disabled on error
+      break;
+  }
 
-  // Handle serial communication
+  stepper.run(); // This function must be called repeatedly to make the stepper motor move.
+                 // It handles acceleration, deceleration, and step generation.
+
+  // Handle any incoming serial commands.
   handleSerialInput();
   
-  // Send periodic feedback
+  // Send periodic feedback data to the host system.
   sendFeedback();
-
 }
 
+// Reads incoming serial data and processes complete command strings.
 void handleSerialInput() {
-  while (Serial.available()) {
-    char c = Serial.read();
+  while (Serial.available()) { // Check if there is any data available in the serial buffer.
+    char c = Serial.read();    // Read a character from the serial buffer.
     
+    // If a newline or carriage return character is received, it signifies the end of a command.
     if (c == '\n' || c == '\r') {
-      if (bufferIndex > 0) {
-        inputBuffer[bufferIndex] = '\0';
-        processCommand(inputBuffer);
-        bufferIndex = 0;
+      if (bufferIndex > 0) { // If there's data in the buffer, process it.
+        inputBuffer[bufferIndex] = '\0'; // Null-terminate the received command string.
+        processCommand(inputBuffer);      // Call processCommand to handle the received command.
+        bufferIndex = 0;                  // Reset buffer index for the next command.
       }
     } else {
+      // Store the character in the input buffer if there's space.
       if (bufferIndex < sizeof(inputBuffer) - 1) {
         inputBuffer[bufferIndex++] = c;
       }
@@ -147,96 +202,115 @@ void handleSerialInput() {
   }
 }
 
+// Dispatches parsed commands to their respective handler functions based on command type.
 void processCommand(char* commandString) {
-  Command parsedCommand = parseCommand(commandString);
-  char commandChar = parsedCommand.type;
-  int commandValue = parsedCommand.value;
+  Command parsedCommand = parseCommand(commandString); // Parse the raw command string.
+  char commandChar = parsedCommand.type;               // Get the command type character.
 
+  // Use a switch statement to call the appropriate handler function for each command type.
   switch (commandChar) {
-    case 'M': {  // Move command: M,angle
+    case 'M': {  // Move command: M,angle (e.g., M,90.5)
         handleMoveCommand(parsedCommand);
         break;
     }
     
-
-    case 'D': {  // Diagnostic move: D,steps
+    case 'D': {  // Diagnostic move: D,steps (e.g., D,1000) - moves a specific number of steps.
         handleDiagnosticMoveCommand(parsedCommand);
         break;
     }
     
-    case 'S': {  // Settings command: S,maxSpeed,maxAccel,pidP,pidI,pidD
+    case 'S': {  // Settings command: S,maxSpeed,maxAccel,pidP,pidI,pidD (e.g., S,20000,10000,1.0,0.0,0.1)
         handleSettingsCommand(parsedCommand);
         break;
     }
     
-    case 'R': {  // Reset position: R
+    case 'R': {  // Reset position: R - sets the current position to 0.
         handleResetCommand(parsedCommand);
         break;
     }
     
-    case 'Q': {  // Query status: Q
+    case 'Q': {  // Query status: Q - requests immediate feedback.
         handleQueryCommand(parsedCommand);
         break;
     }
     
-    case 'E': {  // Emergency stop: E
+    case 'E': {  // Emergency stop: E - immediately stops the motor and disables the driver.
         handleEmergencyStopCommand(parsedCommand);
         break;
     }
     
-    case 'H': {  // Home (go to position 0)
+    case 'H': {  // Home command: H - moves the motor to the 0 position.
         handleHomeCommand(parsedCommand);
         break;
     }
 
-    case 'X': {  // Enable/disable driver: X,1 (enable) or X,0 (disable)
+    case 'X': {  // Driver control: X,1 (enable) or X,0 (disable) - controls the stepper driver enable pin.
         handleDriverCommand(parsedCommand);
         break;
     }
-    default:
+    default: // Handle unknown command types.
       Serial.print("ERROR: Unknown command type: ");
       Serial.println(parsedCommand.type);
       break;
   }
 }
 
+// Moves the stepper motor to a specified absolute angle.
+// The angle is converted to steps, and the stepper is commanded to move to that position.
 void moveToAngle(float angle) {
-  // Convert angle to steps
-  // 360 degrees = TOTAL_STEPS_PER_REV steps
+  // Convert the desired angle (in degrees) into corresponding microsteps.
+  // 360 degrees corresponds to TOTAL_STEPS_PER_REV microsteps.
   long steps = (long)(angle * TOTAL_STEPS_PER_REV / 360.0);
   
-  targetPosition = stepper.currentPosition() + steps;
+  // Set the target position for the stepper motor.
+  // The AccelStepper library will then manage the movement to this target.
+  targetPosition = steps;
   stepper.moveTo(targetPosition);
 }
+
+// Handles the 'M' (Move) command.
+// Expects an angle as an argument (e.g., "M,90.0").
 void handleMoveCommand(Command cmd) {
+  // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
     Serial.println("ERROR: Move command missing angle argument");
     return;
   }
-  float angle = atof(cmd.args);
-  // Additional validation for angle range could be added here if needed
-  moveToAngle(angle);
+  float angle = atof(cmd.args); // Convert the argument string to a float (angle).
+  // Additional validation for angle range could be added here if needed.
+  moveToAngle(angle); // Command the motor to move to the specified angle.
+  currentMotorState = MOVING; // Set state to MOVING when a move command is issued
 }
 
+// Handles the 'D' (Diagnostic Move) command.
+// Expects a number of steps as an argument (e.g., "D,1000").
+// This command moves the motor by a relative number of steps.
 void handleDiagnosticMoveCommand(Command cmd) {
+  // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
     Serial.println("ERROR: Diagnostic move command missing steps argument");
     return;
   }
-  long diagnosticSteps = atol(cmd.args);
-  stepper.move(diagnosticSteps);
-  Serial.print("Diagnostic: Moving ");
+  long diagnosticSteps = atol(cmd.args); // Convert the argument string to a long (steps).
+  stepper.move(diagnosticSteps);         // Command the motor to move by the specified relative steps.
+  Serial.print("Diagnostic: Moving ");  // Print diagnostic information to serial.
   Serial.print(diagnosticSteps);
   Serial.println(" steps");
 }
 
+// Handles the 'S' (Settings) command.
+// Expects a comma-separated list of settings: maxSpeed,maxAccel,pidP,pidI,pidD
+// (e.g., "S,20000,10000,1.0,0.0,0.1").
 void handleSettingsCommand(Command cmd) {
+  // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
     Serial.println("ERROR: Settings command missing arguments");
     return;
   }
-  char* argsCopy = strdup(cmd.args); // Create a mutable copy
-  char* token = strtok(argsCopy, ",");
+  char* argsCopy = strdup(cmd.args); // Create a mutable copy of the arguments string for strtok.
+  char* token = strtok(argsCopy, ","); // Tokenize the string by commas.
+
+  // Parse each setting from the tokenized string.
   if (token) maxSpeed = atof(token);
   token = strtok(NULL, ",");
   if (token) maxAccel = atof(token);
@@ -247,9 +321,11 @@ void handleSettingsCommand(Command cmd) {
   token = strtok(NULL, ",");
   if (token) pidD = atof(token);
   
+  // Apply the new speed and acceleration settings to the stepper motor.
   stepper.setMaxSpeed(maxSpeed);
   stepper.setAcceleration(maxAccel);
   
+  // Print the updated settings to the serial monitor for confirmation.
   Serial.print("SETTINGS:");
   Serial.print(maxSpeed);
   Serial.print(",");
@@ -260,78 +336,118 @@ void handleSettingsCommand(Command cmd) {
   Serial.print(pidI);
   Serial.print(",");
   Serial.println(pidD);
-  free(argsCopy); // Free the duplicated string
+  free(argsCopy); // Free the dynamically allocated memory for the string copy.
 }
 
+// Handles the 'R' (Reset) command.
+// Resets the stepper motor's current position to 0 and clears the target position.
 void handleResetCommand(Command cmd) {
-  stepper.setCurrentPosition(0);
-  targetPosition = 0;
-  Serial.println("RESET:OK");
+  stepper.setCurrentPosition(0); // Set the stepper's current position to 0.
+  targetPosition = 0;            // Reset the target position.
+  Serial.println("RESET:OK");    // Confirm reset.
+  currentMotorState = IDLE; // Set state to IDLE on reset
 }
 
+// Handles the 'Q' (Query) command.
+// Triggers an immediate feedback message to be sent.
 void handleQueryCommand(Command cmd) {
-  sendImmediateFeedback();
+  sendImmediateFeedback(); // Send current status feedback.
 }
 
+// Handles the 'E' (Emergency Stop) command.
+// Immediately stops the motor, sets its current position, and disables the driver.
 void handleEmergencyStopCommand(Command cmd) {
-  stepper.stop();
+  stepper.stop(); // Stop any ongoing motor movement.
+  // Set current position to its current value to clear any pending moves.
   stepper.setCurrentPosition(stepper.currentPosition());
-  disableDriver();  // Disable motor respecting polarity
-  Serial.println("STOP:OK");
-  enableDriver(); // Re-enable after stop
+  disableDriver();  // Disable the motor driver to cut power to the motor.
+  Serial.println("STOP:OK"); // Confirm emergency stop.
+  enableDriver(); // Re-enable the driver after the stop.
+  currentMotorState = STOPPED; // Set state to STOPPED on emergency stop
 }
 
+// Handles the 'H' (Home) command.
+// Commands the motor to move to the absolute 0 angle.
 void handleHomeCommand(Command cmd) {
-  moveToAngle(0);
+  moveToAngle(0); // Move to the home position (0 degrees).
+  currentMotorState = HOMING; // Set state to HOMING when a home command is issued
 }
 
+// Handles the 'X' (Driver Control) command.
+// Expects an argument: '1' to enable the driver, '0' to disable it.
+// (e.g., "X,1" or "X,0").
 void handleDriverCommand(Command cmd) {
+  // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
     Serial.println("ERROR: Driver command missing argument");
     return;
   }
-  int enable = atoi(cmd.args);
+  int enable = atoi(cmd.args); // Convert the argument string to an integer.
+
+  // Control the driver based on the argument.
   if (enable == 1) {
-    digitalWrite(DRIVER_ENABLE_PIN, LOW); // Enable driver
+    digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? HIGH : LOW); // Enable driver.
     Serial.println("Driver Enabled");
   } else if (enable == 0) {
-    digitalWrite(DRIVER_ENABLE_PIN, HIGH); // Disable driver
+    digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? LOW : HIGH); // Disable driver.
     Serial.println("Driver Disabled");
   } else {
     Serial.println("ERROR: Invalid driver command argument. Use 0 to disable, 1 to enable.");
   }
 }
 
+// Sends periodic feedback data to the serial monitor.
+// This function uses millis() for non-blocking timing.
 void sendFeedback() {
-  unsigned long currentTime = millis();
+  unsigned long currentTime = millis(); // Get the current time in milliseconds.
   
+  // Check if enough time has passed since the last feedback was sent.
   if (currentTime - lastFeedbackTime >= FEEDBACK_INTERVAL) {
-    sendImmediateFeedback();
-    lastFeedbackTime = currentTime;
+    sendImmediateFeedback(); // Send feedback.
+    lastFeedbackTime = currentTime; // Update the timestamp of the last feedback.
   }
 }
 
+// Sends an immediate feedback message to the serial monitor.
+// This includes current angle, target angle, speed, movement status, and timestamp.
 void sendImmediateFeedback() {
-  long currentPos = stepper.currentPosition();
+  long currentPos = stepper.currentPosition(); // Get the current position in steps.
+  // Convert current position from steps to degrees.
   float currentAngle = (float)currentPos * 360.0 / TOTAL_STEPS_PER_REV;
+  // Convert target position from steps to degrees.
   float targetAngle = (float)targetPosition * 360.0 / TOTAL_STEPS_PER_REV;
   
+  // Print formatted feedback data to the serial monitor.
   Serial.print("FB:");
-  Serial.print(currentAngle, 2);
+  Serial.print(currentAngle, 2); // Current angle, 2 decimal places.
   Serial.print(",");
-  Serial.print(targetAngle, 2);
+  Serial.print(targetAngle, 2); // Target angle, 2 decimal places.
   Serial.print(",");
-  Serial.print(stepper.speed());
+  Serial.print(stepper.speed()); // Current speed.
   Serial.print(",");
-  Serial.print(stepper.isRunning() ? 1 : 0);
+  Serial.print(stepper.isRunning() ? 1 : 0); // Is motor running (1) or stopped (0).
   Serial.print(",");
-  Serial.println(millis());
+  Serial.println(millis()); // Current timestamp.
 }
 
+// Utility function to convert an angle in degrees to microsteps.
 float angleToSteps(float angle) {
   return angle * TOTAL_STEPS_PER_REV / 360.0;
 }
 
+// Utility function to convert microsteps to an angle in degrees.
 float stepsToAngle(long steps) {
   return (float)steps * 360.0 / TOTAL_STEPS_PER_REV;
 }
+
+// Enum for motor states
+enum MotorState {
+  IDLE,
+  MOVING,
+  STOPPED,
+  HOMING,
+  ERROR
+};
+
+// Current state of the motor
+MotorState currentMotorState = IDLE;
