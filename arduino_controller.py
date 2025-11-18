@@ -34,6 +34,15 @@ class ArduinoController:
         self.min_interval_ms: float = float(self.cfg.get('min_command_interval_ms', 0.0) or 0.0)
         self.is_moving: bool = False
 
+    def disconnect(self) -> None:
+        if self._ser:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+            finally:
+                self._ser = None
+
     def connect(self) -> bool:
         if serial is None:
             return False

@@ -36,7 +36,7 @@ class Config:
                 'kp': 1.0,
                 'ki': 0.0,
                 'kd': 0.0,
-                'i_limit': 180.0,
+                'i_limit': 90.0,
                 'output_scale_deg': 60.0,
             },
             'motion': {

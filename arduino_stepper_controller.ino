@@ -207,11 +207,11 @@ void moveToAngle(float angle) {
   // 360 degrees = TOTAL_STEPS_PER_REV steps
   long steps = (long)(angle * TOTAL_STEPS_PER_REV / 360.0);
   
-  // Limit to +/- 180 degrees
-  if (steps > TOTAL_STEPS_PER_REV / 2) {
-    steps = TOTAL_STEPS_PER_REV / 2;
-  } else if (steps < -TOTAL_STEPS_PER_REV / 2) {
-    steps = -TOTAL_STEPS_PER_REV / 2;
+  // Limit to +/- 90 degrees
+  if (steps > TOTAL_STEPS_PER_REV / 4) {
+    steps = TOTAL_STEPS_PER_REV / 4;
+  } else if (steps < -TOTAL_STEPS_PER_REV / 4) {
+    steps = -TOTAL_STEPS_PER_REV / 4;
   }
   
   targetPosition = steps;

@@ -94,8 +94,8 @@ class SimpleTrackingApp(ctk.CTk):
 
         # UI elements
         # Control range and center
-        self.range_deg = int(self.cfg.get('control', 'range_deg') or 180)
-        self.center_deg = int(self.cfg.get('control', 'center_deg') or (90 if self.range_deg == 180 else 180))
+        self.range_deg = int(self.cfg.get('control', 'range_deg') or 90)
+        self.center_deg = int(self.cfg.get('control', 'center_deg') or 45)
         # Slider mode: 'position' for absolute angle, 'velocity' for speed-based control
         self.slider_mode = str(self.cfg.get('control', 'slider_mode') or 'velocity')
 
@@ -347,9 +347,19 @@ class SimpleTrackingApp(ctk.CTk):
 
     def on_close(self):
         self._running = False
+        # Give threads a moment to exit cleanly
+        time.sleep(0.1)
         self.logger.close()
         try:
             self.csv_logger.close()
+        except Exception:
+            pass
+        try:
+            self.video.release()
+        except Exception:
+            pass
+        try:
+            self.arduino.disconnect()
         except Exception:
             pass
         self.destroy()
