@@ -22,6 +22,7 @@
  */
 
 #include <AccelStepper.h>
+#include <EEPROM.h>
 
 // Pin definitions for stepper motor control
 #define DIR_PIN 2      // Digital pin connected to the DIR+ (Direction) pin of the stepper driver
@@ -36,6 +37,13 @@
 // Limit Switch Pin Definitions
 #define LIMIT_SWITCH_MIN_PIN 5 // Digital pin for the minimum limit switch
 #define LIMIT_SWITCH_MAX_PIN 6 // Digital pin for the maximum limit switch
+
+// EEPROM Address Definitions
+#define EEPROM_MAX_SPEED_ADDR 0
+#define EEPROM_MAX_ACCEL_ADDR sizeof(float) // Offset by size of float
+#define EEPROM_PID_P_ADDR (2 * sizeof(float)) // Offset by 2 * size of float
+#define EEPROM_PID_I_ADDR (3 * sizeof(float))
+#define EEPROM_PID_D_ADDR (4 * sizeof(float))
 
 // Stepper motor and driver configuration parameters
 #define STEPS_PER_REV 200  // Number of full steps per revolution of the motor (e.g., 1.8 degree/step motor has 200 steps/rev)
@@ -257,8 +265,7 @@ void processCommand(char* commandString) {
         break;
     }
     default: // Handle unknown command types.
-      Serial.print("ERROR: Unknown command type: ");
-      Serial.println(parsedCommand.type);
+      reportError(UNKNOWN_COMMAND_TYPE_ERROR, "Unknown command type");
       break;
   }
 }
@@ -387,7 +394,7 @@ void handleHomeCommand(Command cmd) {
 void handleDriverCommand(Command cmd) {
   // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
-    Serial.println("ERROR: Driver command missing argument");
+    reportError(DRIVER_COMMAND_MISSING_ARG_ERROR, "Driver command missing argument");
     return;
   }
   int enable = atoi(cmd.args); // Convert the argument string to an integer.
@@ -400,7 +407,7 @@ void handleDriverCommand(Command cmd) {
     digitalWrite(ENABLE_PIN, ENABLE_ACTIVE_HIGH ? LOW : HIGH); // Disable driver.
     Serial.println("Driver Disabled");
   } else {
-    Serial.println("ERROR: Invalid driver command argument. Use 0 to disable, 1 to enable.");
+    reportError(INVALID_DRIVER_COMMAND_ARG_ERROR, "Invalid driver command argument. Use 0 to disable, 1 to enable.");
   }
 }
 
@@ -461,8 +468,7 @@ void performHomingSequence() {
   while (digitalRead(LIMIT_SWITCH_MIN_PIN) == HIGH) { // Assuming HIGH when not pressed
     stepper.run();
     if (!stepper.isRunning()) { // Should not happen if moving a large distance, but as a safeguard
-      Serial.println("ERROR: Homing failed to reach limit switch.");
-      currentMotorState = ERROR;
+      reportError(HOMING_FAILED_LIMIT_SWITCH_ERROR, "Homing failed to reach limit switch.");
       return;
     }
   }
