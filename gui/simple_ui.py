@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import threading
 import queue
+import logging
 from typing import Optional
 
 import cv2
@@ -30,6 +31,11 @@ class SimpleTrackingApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
+        # Configure logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='f:\\Documents\\Arduino\\pastor_follow_v2\\last_session.log', filemode='a')
+        self.app_logger = logging.getLogger(__name__)
+        self.app_logger.info("Application started.")
+
         # Config and hardware
         self.cfg = Config()
         # Make host-side rate-limiting permissive for immediacy
@@ -47,7 +53,7 @@ class SimpleTrackingApp(ctk.CTk):
             write_header=True,
         )
         # VideoCapture expects a config dict
-        self.video = VideoCapture({
+        self.video_capture = VideoCapture({
             'capture_index': self.cfg.get('video', 'capture_index'),
             'width': self.cfg.get('video', 'width'),
             'height': self.cfg.get('video', 'height'),
@@ -56,16 +62,38 @@ class SimpleTrackingApp(ctk.CTk):
             'fourcc': self.cfg.get('video', 'fourcc'),
             'buffersize': self.cfg.get('video', 'buffersize'),
         })
-        self.arduino = ArduinoController(self.cfg.get('arduino'))
+        self.arduino_controller = ArduinoController(self.cfg.get('arduino'))
         # Establish connection so immediate OutDelta commands move the motor
         try:
-            self.arduino.connect()
-        except Exception:
+            self.arduino_controller.connect()
+        except Exception as e:
+            self.app_logger.error(f"Failed to connect to Arduino: {e}")
             pass
+
+        # Initialize new tracking components
+        self.motor_interface = MotorInterface(self.arduino_controller)
+        self.camera_interface = CameraInterface(self.video_capture)
+        self.pose_tracker = PoseTracker()
+        self.fov_estimator = FOVEstimator(
+            initial_fov_deg=float(self.cfg.get('tracking', 'initial_fov_deg') or 60.0),
+            alpha=float(self.cfg.get('tracking', 'fov_alpha') or 0.1)
+        )
+        self.tracker_controller = TrackerController(
+            camera_interface=self.camera_interface,
+            motor_interface=self.motor_interface,
+            pose_tracker=self.pose_tracker,
+            fov_estimator=self.fov_estimator,
+            logger=self.app_logger,
+            pid_kp=float(self.cfg.get('pid', 'kp') or 1.0),
+            pid_ki=float(self.cfg.get('pid', 'ki') or 0.0),
+            pid_kd=float(self.cfg.get('pid', 'kd') or 0.0),
+            pid_i_limit=float(self.cfg.get('pid', 'i_limit') or 180.0),
+            motor_speed_limit_deg_s=float(self.cfg.get('motion', 'max_speed_deg_s') or 60.0)
+        )
 
         # Raw mover (kept for future head-tracking), but slider will control motion now
         self.mover = RawMovementController(
-            obArduino=self.arduino,
+            obArduino=self.arduino_controller,
             fScaleDegPerUnit=float(self.cfg.get('pid', 'output_scale_deg') or 60.0),
             fDeadbandDeg=float(self.cfg.get('arduino', 'command_deadband_deg') or 0.0),
             logger=self.logger,
@@ -236,52 +264,48 @@ class SimpleTrackingApp(ctk.CTk):
             dt = max(0.0, now - self._last_loop_ts)
             self._last_loop_ts = now
 
-            # Video frame
-            ret, frame = self.video.get_frame(timeout=0.05)
-            if ret and frame is not None:
-                # Queue frame and status for UI-thread rendering
-                try:
-                    status = self.video.get_status()
-                    h, w = frame.shape[:2]
-                    fps_meas = float(status.get('fps_measured', 0.0))
-                    connected = bool(status.get('connected', False))
-                    backend = str(status.get('backend', ''))
-                    drops = int(status.get('drops_1s', 0))
-                    fails = int(status.get('fail_count', 0))
-                    if self._ui_queue.full():
-                        _ = self._ui_queue.get_nowait()
-                    self._ui_queue.put_nowait({'frame': frame, 'w': w, 'h': h, 'fps': fps_meas, 'connected': connected, 'backend': backend, 'drops': drops, 'fails': fails})
-                except Exception as e:
-                    self.logger.log_failure(f"ui_queue_error:{e}")
-            else:
-                try:
-                    if self._ui_queue.full():
-                        _ = self._ui_queue.get_nowait()
-                    self._ui_queue.put_nowait({'frame': None, 'w': 0, 'h': 0, 'fps': 0.0})
-                except Exception:
-                    pass
-
-            # Arduino feedback
-            fb = self.arduino.get_feedback(timeout=0.0)
-            angle = float(fb.current_angle) if fb else float(self.arduino.current_position or 0.0)
-            speed = float(fb.current_speed) if fb else 0.0
-
-            # Motion update → send delta (velocity mode only)
+            # Use TrackerController to perform one tick of tracking and control
             try:
-                if self.slider_mode != 'position':
-                    delta = float(self.motion.update(dt_s=dt, motor_angle_deg=angle, motor_speed_deg_s=speed))
-                    if abs(delta) > 0.0:
-                        self.arduino.move_by_delta(delta)
+                self.tracker_controller.tick()
+                current_sample = self.tracker_controller.get_latest_sample()
+                if current_sample and current_sample.person_valid and current_sample.x_person_pixel_position is not None:
+                    # For UI, we need the frame and potentially annotated frame
+                    # The TrackerController's tick method should handle frame grabbing and pose estimation
+                    # We need to get the frame from the camera_interface after the tick
+                    _, frame = self.camera_interface.grab_frame()
+                    if frame is not None:
+                        # Draw a circle at the detected person's x-position for visual feedback
+                        frame_height, frame_width, _ = frame.shape
+                        x_pixel = int(current_sample.x_person_pixel_position)
+                        cv2.circle(frame, (x_pixel, frame_height // 2), 20, (0, 255, 0), 2) # Green circle
+
+                        if self._ui_queue.full():
+                            _ = self._ui_queue.get_nowait()
+                        self._ui_queue.put_nowait({'frame': frame, 'w': frame_width, 'h': frame_height, 'fps': 0.0, 'connected': True, 'backend': 'OpenCV', 'drops': 0, 'fails': 0})
+                else:
+                    # If no person detected or frame not available, still try to get a frame for display
+                    _, frame = self.camera_interface.grab_frame()
+                    if frame is not None:
+                        frame_height, frame_width, _ = frame.shape
+                        if self._ui_queue.full():
+                            _ = self._ui_queue.get_nowait()
+                        self._ui_queue.put_nowait({'frame': frame, 'w': frame_width, 'h': frame_height, 'fps': 0.0, 'connected': True, 'backend': 'OpenCV', 'drops': 0, 'fails': 0})
+                    else:
+                        if self._ui_queue.full():
+                            _ = self._ui_queue.get_nowait()
+                        self._ui_queue.put_nowait({'frame': None, 'w': 0, 'h': 0, 'fps': 0.0})
+
+                # Update motor status label based on motor_interface feedback
+                motor_state = self.motor_interface.get_latest_state()
+                if motor_state:
+                    self.lbl_motor.configure(text=f"Motor: connected | angle={motor_state.motor_angle_degrees:.2f}°")
+                else:
+                    self.lbl_motor.configure(text="Motor: disconnected")
+
             except Exception as e:
-                self.logger.log_failure(f"motion_update_error:{e}")
+                self.app_logger.error(f"Error in main loop: {e}")
 
             time.sleep(0.01)
-
-            # Update motor status label once per loop
-            try:
-                self.lbl_motor.configure(text=f"Motor: {'connected' if self.arduino._ser else 'stub'} | angle={angle:.2f}° | speed={speed:.1f}°/s")
-            except Exception:
-                pass
 
     def _ui_pump(self):
         # Consume queued video updates and apply them on the UI thread
@@ -355,13 +379,14 @@ class SimpleTrackingApp(ctk.CTk):
         except Exception:
             pass
         try:
-            self.video.release()
+            self.video_capture.release()
         except Exception:
             pass
         try:
-            self.arduino.disconnect()
+            self.arduino_controller.disconnect()
         except Exception:
             pass
+        self.app_logger.info("Application closed.")
         self.destroy()
 
 
