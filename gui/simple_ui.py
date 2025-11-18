@@ -242,9 +242,11 @@ class SimpleTrackingApp(ctk.CTk):
                     status = self.video.get_status()
                     h, w = frame.shape[:2]
                     fps_meas = float(status.get('fps_measured', 0.0))
+                    connected = bool(status.get('connected', False))
+                    backend = str(status.get('backend', ''))
                     if self._ui_queue.full():
                         _ = self._ui_queue.get_nowait()
-                    self._ui_queue.put_nowait({'frame': frame, 'w': w, 'h': h, 'fps': fps_meas})
+                    self._ui_queue.put_nowait({'frame': frame, 'w': w, 'h': h, 'fps': fps_meas, 'connected': connected, 'backend': backend})
                 except Exception as e:
                     self.logger.log_failure(f"ui_queue_error:{e}")
             else:
@@ -296,7 +298,12 @@ class SimpleTrackingApp(ctk.CTk):
                     w = int(item.get('w', img_rgb.shape[1]))
                     h = int(item.get('h', img_rgb.shape[0]))
                     fps_meas = float(item.get('fps', 0.0))
-                    self.lbl_video.configure(text=f"Video: OK {w}x{h} @ {fps_meas:.1f}fps")
+                    connected = bool(item.get('connected', False))
+                    backend = str(item.get('backend', ''))
+                    if connected:
+                        self.lbl_video.configure(text=f"Video: {backend} {w}x{h} @ {fps_meas:.1f}fps")
+                    else:
+                        self.lbl_video.configure(text=f"Video: disconnected (showing synthetic)")
                 except Exception as e:
                     self.lbl_video.configure(text=f"Video error: {e}")
             else:
