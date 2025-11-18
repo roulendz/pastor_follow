@@ -37,7 +37,7 @@ class Config:
                 'ki': 0.0,
                 'kd': 0.0,
                 'i_limit': 90.0,
-                'output_scale_deg': 60.0,
+                'output_scale_deg': 90.0,
             },
             'motion': {
                 # Stage max velocity: 25°/s per PDV PT-GD201 spec
@@ -58,8 +58,8 @@ class Config:
                 'unidir_hold_ms': 250,
             },
             'control': {
-                'range_deg': 180,     # or 360
-                'center_deg': 90,     # 180-range -> 90, 360-range -> 180
+                'range_deg': 90,
+                'center_deg': 0,
                 'home_anim_ms': 250,  # smooth animation duration back to center
                 'slider_mode': 'position',
             },

@@ -27,7 +27,7 @@
 #define STEPS_PER_REV 200  // Motor steps per revolution
 #define GEAR_RATIO 180     // 180:1 gear ratio
 #define MICROSTEPS 8       // DM542 microstepping setting
-#define TOTAL_STEPS_PER_REV (STEPS_PER_REV * GEAR_RATIO * MICROSTEPS)
+#define TOTAL_STEPS_PER_REV ( (long)STEPS_PER_REV * GEAR_RATIO * MICROSTEPS)
 
 // Create stepper object (using DRIVER interface)
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
@@ -58,8 +58,8 @@ struct Feedback {
 };
 
 // PID parameters (will be set from PC)
-float maxSpeed = 5000.0;
-float maxAccel = 2000.0;
+float maxSpeed = 25000.0; // Corresponds to 25 deg/s stage speed with 10 microsteps
+float maxAccel = 12500.0; // Half of maxSpeed for smooth acceleration
 float pidP = 1.0;
 float pidI = 0.0;
 float pidD = 0.1;
@@ -91,14 +91,14 @@ void setup() {
 }
 
 void loop() {
+  stepper.run(); // This must always be called to make the stepper move
+
   // Handle serial communication
   handleSerialInput();
   
-  // Run stepper motor
-  stepper.run();
-  
   // Send periodic feedback
   sendFeedback();
+
 }
 
 void handleSerialInput() {
@@ -126,6 +126,16 @@ void processCommand(char* cmd) {
     case 'M': {  // Move command: M,angle
       float angle = atof(cmd + 2);
       moveToAngle(angle);
+      break;
+    }
+    
+
+    case 'D': {  // Diagnostic move: D,steps
+      long steps = atol(cmd + 2);
+      stepper.move(steps);
+      Serial.print("Diagnostic: Moving ");
+      Serial.print(steps);
+      Serial.println(" steps");
       break;
     }
     

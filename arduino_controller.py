@@ -33,6 +33,8 @@ class ArduinoController:
         self._last_send_ms: int = 0
         self.min_interval_ms: float = float(self.cfg.get('min_command_interval_ms', 0.0) or 0.0)
         self.is_moving: bool = False
+        self.i_limit = float(self.cfg.get('pid', {}).get('i_limit', 180.0))
+        self.control_range_deg = float(self.cfg.get('control', {}).get('range_deg', 180.0))
 
     def disconnect(self) -> None:
         if self._ser:
@@ -80,10 +82,11 @@ class ArduinoController:
         """Move to an absolute stage angle in degrees.
 
         Sends an 'M,<angle>' command if serial is available; otherwise updates
-        the stubbed position directly. Clamps to [-180, 180] to match firmware.
+        the stubbed position directly. Clamps to [-control_range_deg/2, control_range_deg/2] to match firmware.
         """
         # Clamp to stage limits
-        target_angle = max(-180.0, min(180.0, float(angle_deg)))
+        limit = self.control_range_deg / 2.0
+        target_angle = max(-limit, min(limit, float(angle_deg)))
         self.current_position = target_angle
         if self._ser:
             try:
