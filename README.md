@@ -279,12 +279,13 @@ The system automatically creates a configuration file with these sections:
 ## Development
 
 ### Adding New Features
-The modular design makes it easy to extend:
+The modular design makes it easy to extend. See `docs/architecture.md` for the full component diagram and API contracts.
 - `video_capture.py`: Video input handling
 - `pose_detection.py`: Computer vision processing
 - `pid_controller.py`: Control algorithms
 - `arduino_controller.py`: Hardware communication
 - `main_app.py`: GUI and integration
+ - `face_centering/`: Modular face-centering package (detector adapter, smoothing, coordinates, movement, monitor, pipeline)
 
 ### Testing
 Test individual modules:
