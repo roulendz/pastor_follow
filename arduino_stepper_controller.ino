@@ -15,8 +15,8 @@
  * Common Cathode Wiring:
  * Arduino GND -> DM542 DIR-, PUL-, ENA-
  *
- * @author Your Name/Organization
- * @date YYYY-MM-DD
+ * @author Rolands Zeltins | Logingrupa
+ * @date 2025-11-18
  * @version 1.0.0
  * @license MIT License (or appropriate license)
  */
@@ -32,6 +32,10 @@
 // Set to 1 if HIGH voltage enables the driver (typical for common cathode wiring)
 // Set to 0 if LOW voltage enables the driver (for common anode or inverted logic)
 #define ENABLE_ACTIVE_HIGH 0
+
+// Limit Switch Pin Definitions
+#define LIMIT_SWITCH_MIN_PIN 5 // Digital pin for the minimum limit switch
+#define LIMIT_SWITCH_MAX_PIN 6 // Digital pin for the maximum limit switch
 
 // Stepper motor and driver configuration parameters
 #define STEPS_PER_REV 200  // Number of full steps per revolution of the motor (e.g., 1.8 degree/step motor has 200 steps/rev)
@@ -131,7 +135,11 @@ void setup() {
   // Configure the enable pin as an output and enable the driver.
   pinMode(ENABLE_PIN, OUTPUT); // Set the ENABLE_PIN as an output.
   enableDriver();              // Call helper function to enable the stepper driver.
-  
+
+  // Configure limit switch pins as inputs with pull-up resistors
+  pinMode(LIMIT_SWITCH_MIN_PIN, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_MAX_PIN, INPUT_PULLUP);
+
   currentMotorState = IDLE; // Initialize motor state to IDLE
   
   // Print header for feedback data and a ready message to the serial monitor.
@@ -171,7 +179,7 @@ void loop() {
       break;
   }
 
-  stepper.run(); // This function must be called repeatedly to make the stepper motor move.
+  // stepper.run(); // This function must be called repeatedly to make the stepper motor move.
                  // It handles acceleration, deceleration, and step generation.
 
   // Handle any incoming serial commands.
@@ -438,6 +446,44 @@ float angleToSteps(float angle) {
 // Utility function to convert microsteps to an angle in degrees.
 float stepsToAngle(long steps) {
   return (float)steps * 360.0 / TOTAL_STEPS_PER_REV;
+}
+
+// Function to perform the homing sequence
+void performHomingSequence() {
+  Serial.println("HOMING: Starting homing sequence...");
+  currentMotorState = HOMING;
+
+  // Move towards the minimum limit switch until it's pressed
+  stepper.setMaxSpeed(maxSpeed / 2); // Use a slower speed for homing
+  stepper.setAcceleration(maxAccel / 2);
+  stepper.moveTo(-TOTAL_STEPS_PER_REV * 2); // Move a large distance in the negative direction
+
+  while (digitalRead(LIMIT_SWITCH_MIN_PIN) == HIGH) { // Assuming HIGH when not pressed
+    stepper.run();
+    if (!stepper.isRunning()) { // Should not happen if moving a large distance, but as a safeguard
+      Serial.println("ERROR: Homing failed to reach limit switch.");
+      currentMotorState = ERROR;
+      return;
+    }
+  }
+
+  // Stop the motor once the limit switch is pressed
+  stepper.stop();
+  stepper.setCurrentPosition(stepper.currentPosition()); // Set current position to stop any pending moves
+
+  // Move slightly off the limit switch
+  stepper.moveTo(stepper.currentPosition() + (TOTAL_STEPS_PER_REV / 100)); // Move 1/100th of a revolution positively
+  while (stepper.isRunning()) {
+    stepper.run();
+  }
+
+  // Set the current position as the new zero
+  stepper.setCurrentPosition(0);
+  targetPosition = 0;
+  Serial.println("HOMING: Sequence complete. Position set to 0.");
+  currentMotorState = IDLE;
+  stepper.setMaxSpeed(maxSpeed); // Restore original speed
+  stepper.setAcceleration(maxAccel); // Restore original acceleration
 }
 
 // Enum for motor states
