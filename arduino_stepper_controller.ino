@@ -149,7 +149,9 @@ void setup() {
   pinMode(LIMIT_SWITCH_MAX_PIN, INPUT_PULLUP);
 
   currentMotorState = IDLE; // Initialize motor state to IDLE
-  
+
+  loadSettings(); // Load settings from EEPROM on startup
+
   // Print header for feedback data and a ready message to the serial monitor.
   Serial.println("FB_HEADER:currentAngle,targetAngle,speed,isRunning,timestamp");
   Serial.println("READY");
@@ -352,9 +354,10 @@ void handleSettingsCommand(Command cmd) {
   Serial.print(",");
   Serial.println(pidD);
   free(argsCopy); // Free the dynamically allocated memory for the string copy.
-}
-
-// Handles the 'R' (Reset) command.
+  saveSettings(); // Save settings to EEPROM after modification
+ }
+ 
+ // Handles the 'R' (Reset) command.
 // Resets the stepper motor's current position to 0 and clears the target position.
 void handleResetCommand(Command cmd) {
   stepper.setCurrentPosition(0); // Set the stepper's current position to 0.
@@ -528,4 +531,34 @@ void reportError(ErrorType error, const char* message = "") {
   Serial.print(" - ");
   Serial.println(message);
 }
+
+// Function to load settings from EEPROM
+void loadSettings() {
+  EEPROM.get(EEPROM_MAX_SPEED_ADDR, maxSpeed);
+  EEPROM.get(EEPROM_MAX_ACCEL_ADDR, maxAccel);
+  EEPROM.get(EEPROM_PID_P_ADDR, pidP);
+  EEPROM.get(EEPROM_PID_I_ADDR, pidI);
+  EEPROM.get(EEPROM_PID_D_ADDR, pidD);
+
+  // Apply loaded settings to stepper motor
+  stepper.setMaxSpeed(maxSpeed);
+  stepper.setAcceleration(maxAccel);
+
+  Serial.println("SETTINGS: Loaded from EEPROM");
+  Serial.print("Max Speed: "); Serial.println(maxSpeed);
+  Serial.print("Max Accel: "); Serial.println(maxAccel);
+  Serial.print("PID P: "); Serial.println(pidP);
+  Serial.print("PID I: "); Serial.println(pidI);
+  Serial.print("PID D: "); Serial.println(pidD);
+}
+
+// Function to save settings to EEPROM
+void saveSettings() {
+  EEPROM.put(EEPROM_MAX_SPEED_ADDR, maxSpeed);
+  EEPROM.put(EEPROM_MAX_ACCEL_ADDR, maxAccel);
+  EEPROM.put(EEPROM_PID_P_ADDR, pidP);
+  EEPROM.put(EEPROM_PID_I_ADDR, pidI);
+  EEPROM.put(EEPROM_PID_D_ADDR, pidD);
+
+  Serial.println("SETTINGS: Saved to EEPROM");
 }
