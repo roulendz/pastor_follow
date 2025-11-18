@@ -51,6 +51,21 @@
 #define MICROSTEPS 8       // Microstepping setting on the DM542 driver (e.g., 8 for 1/8 microstepping)
 #define TOTAL_STEPS_PER_REV ( (long)STEPS_PER_REV * GEAR_RATIO * MICROSTEPS) // Total microsteps for one full revolution of the output shaft
 
+// Structure to hold parsed command information.
+struct Command {
+  char type;  // Type of command: 'M' (move), 'S' (settings), 'R' (reset), 'Q' (query), etc.
+  char* args; // Pointer to the arguments string following the command type (e.g., "10.5,20.0")
+};
+
+// Structure to hold feedback data sent back to the host system.
+struct Feedback {
+  long currentPosition;   // Current position of the stepper motor in steps.
+  float currentSpeed;     // Current speed of the stepper motor in steps/second.
+  bool isMoving;          // True if the motor is currently moving, false otherwise.
+  long targetPosition;    // The target position the motor is moving towards in steps.
+  unsigned long timestamp; // Timestamp when the feedback was generated (in milliseconds since Arduino startup).
+};
+
 // Create an instance of the AccelStepper library for controlling the stepper motor.
 // AccelStepper::DRIVER specifies that a stepper driver (like DM542) is used,
 // where direction and step signals are separate.
@@ -73,21 +88,6 @@ void disableDriver() {
 // and 'data' is the argument. The offset skips the command type and comma.
 #define COMMAND_DATA_OFFSET 2
 
-// Structure to hold parsed command information.
-struct Command {
-  char type;  // Type of command: 'M' (move), 'S' (settings), 'R' (reset), 'Q' (query), etc.
-  char* args; // Pointer to the arguments string following the command type (e.g., "10.5,20.0")
-};
-
-// Structure to hold feedback data sent back to the host system.
-struct Feedback {
-  long currentPosition;   // Current position of the stepper motor in steps.
-  float currentSpeed;     // Current speed of the stepper motor in steps/second.
-  bool isMoving;          // True if the motor is currently moving, false otherwise.
-  long targetPosition;    // The target position the motor is moving towards in steps.
-  unsigned long timestamp; // Timestamp when the feedback was generated (in milliseconds since Arduino startup).
-};
-
 // PID parameters (currently placeholders, as AccelStepper handles motion profiles internally).
 // These variables are kept for potential future custom PID loop implementation or
 // for passing to a higher-level control system.
@@ -108,6 +108,41 @@ const unsigned long FEEDBACK_INTERVAL = 20;  // Interval in milliseconds for sen
 // Buffer for incoming serial data.
 char inputBuffer[32]; // Character array to store incoming serial commands.
 int bufferIndex = 0;  // Current index in the inputBuffer.
+
+enum MotorState {
+  IDLE,
+  MOVING,
+  STOPPED,
+  HOMING,
+  ERROR
+};
+
+enum ErrorType {
+  NO_ERROR = 0,
+  EMPTY_COMMAND_STRING_ERROR,
+  UNKNOWN_COMMAND_TYPE_ERROR,
+  MOVE_COMMAND_MISSING_ARG_ERROR,
+  DIAGNOSTIC_MOVE_MISSING_ARG_ERROR,
+  SETTINGS_COMMAND_MISSING_ARG_ERROR,
+  DRIVER_COMMAND_MISSING_ARG_ERROR,
+  INVALID_DRIVER_COMMAND_ARG_ERROR,
+  HOMING_FAILED_LIMIT_SWITCH_ERROR
+};
+
+// Global variable to store the current motor state
+enum MotorState currentMotorState = IDLE;
+enum ErrorType currentError = NO_ERROR;
+
+// Function to report errors, set the error state, and print to serial
+void reportError(ErrorType error, const char* message = "") {
+  currentError = error;
+  currentMotorState = ERROR;
+  Serial.print("ERROR:");
+  Serial.print(error);
+  Serial.print(" - ");
+  Serial.println(message);
+}
+
 
 // Function to parse a raw command string received via serial.
 // It extracts the command type and its arguments.
@@ -352,6 +387,8 @@ void handleSettingsCommand(Command cmd) {
   Serial.print(",");
   Serial.print(pidI);
   Serial.print(",");
+  Serial.print(pidD);
+  Serial.print(",");
   Serial.println(pidD);
   free(argsCopy); // Free the dynamically allocated memory for the string copy.
   saveSettings(); // Save settings to EEPROM after modification
@@ -495,42 +532,6 @@ void performHomingSequence() {
   stepper.setAcceleration(maxAccel); // Restore original acceleration
 }
 
-// Enum for motor states
-enum MotorState {
-  IDLE,
-  MOVING,
-  STOPPED,
-  HOMING,
-  ERROR
-};
-
-// Enum for error types
-enum ErrorType {
-  NO_ERROR = 0,
-  EMPTY_COMMAND_STRING_ERROR,
-  MOVE_COMMAND_MISSING_ARG_ERROR,
-  DIAGNOSTIC_MOVE_MISSING_ARG_ERROR,
-  SETTINGS_COMMAND_MISSING_ARG_ERROR,
-  DRIVER_COMMAND_MISSING_ARG_ERROR,
-  INVALID_DRIVER_COMMAND_ARG_ERROR,
-  UNKNOWN_COMMAND_TYPE_ERROR,
-  HOMING_FAILED_LIMIT_SWITCH_ERROR
-};
-
-// Current state of the motor
-MotorState currentMotorState = IDLE;
-// Current error state
-ErrorType currentError = NO_ERROR;
-
-// Function to report errors, set the error state, and print to serial
-void reportError(ErrorType error, const char* message = "") {
-  currentError = error;
-  currentMotorState = ERROR;
-  Serial.print("ERROR:");
-  Serial.print(error);
-  Serial.print(" - ");
-  Serial.println(message);
-}
 
 // Function to load settings from EEPROM
 void loadSettings() {

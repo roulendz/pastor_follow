@@ -131,8 +131,7 @@ enum ErrorType {
 
 // Global variable to store the current motor state
 enum MotorState currentMotorState = IDLE;
-// Current error state
-ErrorType currentError = NO_ERROR;
+enum ErrorType currentError = NO_ERROR;
 
 // Function to report errors, set the error state, and print to serial
 void reportError(ErrorType error, const char* message = "") {
@@ -143,6 +142,7 @@ void reportError(ErrorType error, const char* message = "") {
   Serial.print(" - ");
   Serial.println(message);
 }
+
 
 // Function to parse a raw command string received via serial.
 // It extracts the command type and its arguments.
@@ -532,15 +532,6 @@ void performHomingSequence() {
   stepper.setAcceleration(maxAccel); // Restore original acceleration
 }
 
-// Function to report errors, set the error state, and print to serial
-void reportError(ErrorType error, const char* message = "") {
-  currentError = error;
-  currentMotorState = ERROR;
-  Serial.print("ERROR:");
-  Serial.print(error);
-  Serial.print(" - ");
-  Serial.println(message);
-}
 
 // Function to load settings from EEPROM
 void loadSettings() {
