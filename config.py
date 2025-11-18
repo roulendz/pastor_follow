@@ -13,10 +13,18 @@ class Config:
                 'capture_index': 0,
                 'width': 1280,
                 'height': 720,
-                'fps': 60,
+                'fps': 30,
                 'backend': 'DSHOW',  # Windows: DSHOW preferred; fallback to MSMF
-                'fourcc': 'MJPG',    # Many webcams support 60fps with MJPG
-                'buffersize': 1,
+                'fourcc': 'MJPG',    # Logitech C920: 720p @ 30fps is best with MJPG
+                'buffersize': 2,
+                # Advanced stability tuning (optional; defaults applied in VideoCapture):
+                # Hold last frame for short dropouts to reduce visible blinking
+                'dropout_hold_ms': 200,
+                # Watchdog: reinitialize capture after N consecutive read failures
+                'reinit_fail_threshold': 30,
+                # Watchdog: reinitialize if measured FPS stays below threshold for window_s
+                'reinit_low_fps_threshold': 12.0,
+                'reinit_low_fps_window_s': 3.0,
             },
             'arduino': {
                 'port': 'COM3',

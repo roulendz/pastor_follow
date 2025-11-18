@@ -126,6 +126,10 @@ class SimpleTrackingApp(ctk.CTk):
         self.lbl_video = ctk.CTkLabel(self, text="Video: init", font=("Arial", 12))
         self.lbl_video.grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=6)
 
+        # Motor status indicator
+        self.lbl_motor = ctk.CTkLabel(self, text="Motor: init", font=("Arial", 12))
+        self.lbl_motor.grid(row=4, column=0, columnspan=3, sticky="w", padx=10, pady=6)
+
         # Keep slider width in sync with window size for granularity
         try:
             self.bind("<Configure>", self._on_resize)
@@ -162,7 +166,11 @@ class SimpleTrackingApp(ctk.CTk):
         try:
             if self.slider_mode == 'position':
                 # Send absolute stage angle to Arduino and neutralize motion controller
-                self.arduino.move_to_abs(deg_abs)
+                ok = bool(self.arduino.move_to_abs(deg_abs))
+                try:
+                    self.lbl_motor.configure(text=f"Motor: {'connected' if self.arduino._ser else 'stub'} | cmd={'OK' if ok else 'FAIL'} | tgt={deg_abs:.2f}°")
+                except Exception:
+                    pass
                 self.motion.set_user_input(0.0)
             else:
                 # Velocity mode: drive motion controller from normalized input
@@ -262,6 +270,12 @@ class SimpleTrackingApp(ctk.CTk):
                 self.logger.log_failure(f"motion_update_error:{e}")
 
             time.sleep(0.01)
+
+            # Update motor status label once per loop
+            try:
+                self.lbl_motor.configure(text=f"Motor: {'connected' if self.arduino._ser else 'stub'} | angle={angle:.2f}° | speed={speed:.1f}°/s")
+            except Exception:
+                pass
 
     def _ui_pump(self):
         # Consume queued video updates and apply them on the UI thread
