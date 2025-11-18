@@ -25,8 +25,6 @@ class MovementController:
         self._last_command_sign = 0
         # EMA smoothing state
         self._delta_ema = 0.0
-        # Accumulate deltas between allowed send windows to avoid command spam
-        self._pending_delta = 0.0
 
     # --- Config helpers (DRY) ---
     def _get_float(self, section: str, key: str, default: float) -> float:
@@ -65,7 +63,11 @@ class MovementController:
             span = abs(float(limits[1]) - float(limits[0]))
         except Exception:
             span = 2.0
-        scaled = raw * rules['output_scale_deg'] if span <= 2.0 else raw
+        # Ensure commanded direction follows error sign to avoid jittery sign flips
+        err = float(getattr(self.pid, 'setpoint', 0.5)) - float(measured_x)
+        sign = 1.0 if err > 0.0 else (-1.0 if err < 0.0 else 0.0)
+        scaled_raw = raw * rules['output_scale_deg'] if span <= 2.0 else raw
+        scaled = abs(float(scaled_raw)) * sign
         max_delta = max(0.0, rules['slew_rate_deg_s'] * float(dt))
         return float(np.clip(scaled, -max_delta, max_delta))
 
@@ -73,12 +75,11 @@ class MovementController:
         rules = self._rules()
         now = time.time()
 
-        # Smooth and accumulate pending correction
+        # Smooth the per-step correction (do not accumulate across throttles)
         d = self._smooth_delta(delta_deg, rules['delta_alpha'])
-        self._pending_delta += float(d)
-        p = float(self._pending_delta)
+        p = float(d)
 
-        # Gate on command deadband using the accumulated correction
+        # Gate on command deadband using the smoothed correction
         if abs(p) < rules['cmd_deadband_deg']:
             return MoveCommand(delta_deg=0.0, sent=False, reason="below_cmd_deadband")
 
@@ -92,18 +93,21 @@ class MovementController:
         ):
             return MoveCommand(delta_deg=0.0, sent=False, reason="sign_flip_guard")
 
-        # Hold tiny corrections while motor is moving fast
+        # Hold while the motor is moving fast to prevent chasing targets mid-move
         if rules['moving_hold_speed'] > 0.0:
             fb = getattr(self.arduino, 'last_feedback', None)
             speed = float(getattr(fb, 'current_speed', 0.0)) if fb is not None else 0.0
             if (
                 bool(getattr(self.arduino, 'is_moving', False))
                 and abs(speed) >= rules['moving_hold_speed']
-                and abs(p) <= max(rules['cmd_deadband_deg'] * 2.0, rules['sign_flip_guard_deg'])
+                # If a new command would reverse direction while moving fast, skip it
+                and self._last_command_sign != 0
+                and self._sign(p) != self._last_command_sign
             ):
                 return MoveCommand(delta_deg=0.0, sent=False, reason="moving_fast_hold")
 
         if (now - self._last_send_time) * 1000.0 < rules['min_interval_ms']:
+            # Throttled: do not accumulate; simply indicate current desired correction
             return MoveCommand(delta_deg=p, sent=False, reason="throttled")
 
         if not getattr(self.arduino, "connected", False):
@@ -116,7 +120,5 @@ class MovementController:
         if ok:
             self._last_send_time = now
             self._last_command_sign = cur_sign if cur_sign != 0 else self._last_command_sign
-            # Reset accumulated correction after a successful send
-            self._pending_delta = 0.0
             return MoveCommand(delta_deg=p, sent=True, reason="sent")
         return MoveCommand(delta_deg=p, sent=False, reason="controller_rejected")
