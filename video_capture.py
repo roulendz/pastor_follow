@@ -17,7 +17,7 @@ class VideoCapture:
         index = int(cfg.get('capture_index', 0))
         self.width = int(cfg.get('width', 1280))
         self.height = int(cfg.get('height', 720))
-        self.target_fps = float(cfg.get('fps', 30))
+        self.target_fps = float(cfg.get('fps', 15))
         self.backend = (cfg.get('backend') or 'DSHOW').upper()
         self.fourcc = (cfg.get('fourcc') or 'MJPG').upper()
         self.buffersize = int(cfg.get('buffersize', 1))

@@ -97,24 +97,40 @@ class SimpleTrackingApp(ctk.CTk):
         # Slider mode: 'position' for absolute angle, 'velocity' for speed-based control
         self.slider_mode = str(self.cfg.get('control', 'slider_mode') or 'velocity')
 
-        self.lbl_offset = ctk.CTkLabel(self, text=f"Offset: 0.00°", font=("Arial", 16))
-        self.lbl_offset.grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        # Layout stretch: make columns expand so slider can be full width
+        try:
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=1)
+            self.grid_columnconfigure(2, weight=1)
+        except Exception:
+            pass
+
         # Slider shows offset degrees relative to center: [-range/2, +range/2]
-        self.slider = ctk.CTkSlider(self, from_=-float(self.range_deg)/2.0, to=float(self.range_deg)/2.0, width=300, command=self._on_slider)
-        self.slider.grid(row=0, column=1, padx=10, pady=10)
+        self.slider = ctk.CTkSlider(self, from_=-float(self.range_deg)/2.0, to=float(self.range_deg)/2.0, command=self._on_slider)
+        # Place slider across the full window width
+        self.slider.grid(row=0, column=0, columnspan=3, padx=10, pady=8, sticky="ew")
         # Center is 0 offset
         self.slider.set(0.0)
 
-        # HOME button
+        # Offset label and HOME button on the next row
+        self.lbl_offset = ctk.CTkLabel(self, text=f"Offset: 0.00°", font=("Arial", 16))
+        self.lbl_offset.grid(row=1, column=0, sticky="w", padx=10, pady=6)
+
         self.btn_home = ctk.CTkButton(self, text="HOME", command=self._on_home)
-        self.btn_home.grid(row=0, column=2, padx=10, pady=10)
+        self.btn_home.grid(row=1, column=2, padx=10, pady=6, sticky="e")
 
         self.lbl_canvas = ctk.CTkLabel(self, text="")
-        self.lbl_canvas.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+        self.lbl_canvas.grid(row=2, column=0, columnspan=3, padx=10, pady=10)
 
         # Video status indicators
         self.lbl_video = ctk.CTkLabel(self, text="Video: init", font=("Arial", 12))
-        self.lbl_video.grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=6)
+        self.lbl_video.grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=6)
+
+        # Keep slider width in sync with window size for granularity
+        try:
+            self.bind("<Configure>", self._on_resize)
+        except Exception:
+            pass
 
         # Track both offset and absolute degrees
         self._last_slider_offset = 0.0
@@ -286,10 +302,21 @@ class SimpleTrackingApp(ctk.CTk):
                     slider_norm=float(self.motion.user_norm),
                     motor_angle_deg=float(angle),
                     motor_speed_deg_s=float(speed),
+                    slider_offset_deg=float(self._last_slider_offset),
+                    target_angle_deg=float(self._last_slider_abs),
+                    slider_mode=str(self.slider_mode),
                 )
             except Exception as e:
                 self.logger.log_failure(f"csv_log_error:{e}")
             time.sleep(0.02)
+
+    def _on_resize(self, event):
+        try:
+            # Estimate interior width minus padding for a responsive slider
+            width = max(100, self.winfo_width() - 24)
+            self.slider.configure(width=width)
+        except Exception:
+            pass
 
     def on_close(self):
         self._running = False

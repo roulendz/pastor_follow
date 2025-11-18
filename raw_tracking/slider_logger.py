@@ -15,11 +15,14 @@ def _iso_ts_ms(t: Optional[float] = None) -> str:
 class SliderCSVLogger:
     """CSV logger for slider/motor telemetry with condition tracking.
 
-    Columns:
+    Columns (updated):
     - timestamp
     - mode (normal|restricted)
+    - slider_mode (position|velocity)
     - slider_norm (-1..1)
+    - slider_offset_deg (UI offset degrees; may be 'nan' if unavailable)
     - motor_angle_deg
+    - target_angle_deg (desired absolute stage angle; may be 'nan' if unavailable)
     - motor_speed_deg_s
     - slow_movement (0|1)
     - unidirectional (0|1)
@@ -58,7 +61,7 @@ class SliderCSVLogger:
 
     def _write_header(self):
         hdr = (
-            "timestamp,mode,slider_norm,motor_angle_deg,motor_speed_deg_s,"
+            "timestamp,mode,slider_mode,slider_norm,slider_offset_deg,motor_angle_deg,target_angle_deg,motor_speed_deg_s,"
             "slow_movement,unidirectional,slow_duration_ms,unidir_duration_ms"
         )
         try:
@@ -68,7 +71,15 @@ class SliderCSVLogger:
         except Exception:
             pass
 
-    def log_sample(self, slider_norm: float, motor_angle_deg: float, motor_speed_deg_s: float):
+    def log_sample(
+        self,
+        slider_norm: float,
+        motor_angle_deg: float,
+        motor_speed_deg_s: float,
+        slider_offset_deg: Optional[float] = None,
+        target_angle_deg: Optional[float] = None,
+        slider_mode: Optional[str] = None,
+    ):
         t = time.time()
 
         # Slow movement detection: desired engagement but measured speed below threshold
@@ -112,8 +123,10 @@ class SliderCSVLogger:
             unidir_ms = 0
 
         mode = "restricted" if (self._slow_active or self._unidir_active) else "normal"
+        off_str = "nan" if slider_offset_deg is None else f"{float(slider_offset_deg):.3f}"
+        tgt_str = "nan" if target_angle_deg is None else f"{float(target_angle_deg):.3f}"
         row = (
-            f"{_iso_ts_ms(t)},{mode},{float(slider_norm):.3f},{float(motor_angle_deg):.3f},"
+            f"{_iso_ts_ms(t)},{mode},{(slider_mode or 'unknown')},{float(slider_norm):.3f},{off_str},{float(motor_angle_deg):.3f},{tgt_str},"
             f"{float(motor_speed_deg_s):.3f},{int(self._slow_active)},{int(self._unidir_active)},"
             f"{int(slow_ms)},{int(unidir_ms)}"
         )
