@@ -1,3 +1,4 @@
 .venv310/
 __pycache__/
 last_session.log
+session_info.log

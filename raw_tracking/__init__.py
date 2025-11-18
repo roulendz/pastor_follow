@@ -6,11 +6,8 @@ raw detector outputs without calibration transforms or clamping.
 """
 
 from .raw_control import RawMovementController, RawSessionLogger
-from .raw_pipeline import RawHeadTrackingPipeline, RawTrackingResult
 
 __all__ = [
     "RawMovementController",
     "RawSessionLogger",
-    "RawHeadTrackingPipeline",
-    "RawTrackingResult",
 ]

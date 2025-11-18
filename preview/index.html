@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UI Preview – Slider & Camera Updates</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; background: #111; color: #eee; }
+      .card { background: #1e1e1e; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+      h1, h2 { margin: 0 0 12px 0; }
+      code { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; }
+      .row { display: flex; gap: 16px; flex-wrap: wrap; }
+      .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #2f6; color: #000; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Human Tracking UI – Preview</h1>
+    <div class="card">
+      <h2>Camera Performance</h2>
+      <ul>
+        <li>Backend tuning: <code>DSHOW</code> with fallback.</li>
+        <li>FOURCC set to <code>MJPG</code> for 60fps; buffer size = 1.</li>
+        <li>Threaded capture queue keeps latency low and shows measured FPS.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Slider Control</h2>
+      <ul>
+        <li>Range redesigned to <code>0–180°</code>, center at <code>90°</code>.</li>
+        <li>HOME button returns smoothly to center with ease-out animation.</li>
+        <li>Mapping utilities ensure consistent behavior and are unit-tested.</li>
+      </ul>
+      <div class="row">
+        <span class="pill">SRP</span>
+        <span class="pill">DRY</span>
+        <span class="pill">Unit Tests</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>How to Use</h2>
+      <ol>
+        <li>Run the desktop app: <code>python raw_app.py</code>.</li>
+        <li>Use the slider (0–180°); press HOME to re-center.</li>
+        <li>Check measured FPS in the status text under the video.</li>
+      </ol>
+    </div>
+  </body>
+  </html>
