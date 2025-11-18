@@ -110,7 +110,7 @@ Command parseCommand(char* commandString) {
 
   // Validate the input command string.
   if (commandString == nullptr || strlen(commandString) == 0) {
-    Serial.println("ERROR: Empty command string");
+    reportError(EMPTY_COMMAND_STRING_ERROR, "Empty command string");
     return cmd; // Return an empty command struct on error.
   }
 
@@ -281,7 +281,7 @@ void moveToAngle(float angle) {
 void handleMoveCommand(Command cmd) {
   // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
-    Serial.println("ERROR: Move command missing angle argument");
+    reportError(MOVE_COMMAND_MISSING_ARG_ERROR, "Move command missing angle argument");
     return;
   }
   float angle = atof(cmd.args); // Convert the argument string to a float (angle).
@@ -296,7 +296,7 @@ void handleMoveCommand(Command cmd) {
 void handleDiagnosticMoveCommand(Command cmd) {
   // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
-    Serial.println("ERROR: Diagnostic move command missing steps argument");
+    reportError(DIAGNOSTIC_MOVE_MISSING_ARG_ERROR, "Diagnostic move command missing steps argument");
     return;
   }
   long diagnosticSteps = atol(cmd.args); // Convert the argument string to a long (steps).
@@ -312,7 +312,7 @@ void handleDiagnosticMoveCommand(Command cmd) {
 void handleSettingsCommand(Command cmd) {
   // Validate if arguments are provided.
   if (cmd.args == nullptr || strlen(cmd.args) == 0) {
-    Serial.println("ERROR: Settings command missing arguments");
+    reportError(SETTINGS_COMMAND_MISSING_ARG_ERROR, "Settings command missing arguments");
     return;
   }
   char* argsCopy = strdup(cmd.args); // Create a mutable copy of the arguments string for strtok.
@@ -495,5 +495,31 @@ enum MotorState {
   ERROR
 };
 
+// Enum for error types
+enum ErrorType {
+  NO_ERROR = 0,
+  EMPTY_COMMAND_STRING_ERROR,
+  MOVE_COMMAND_MISSING_ARG_ERROR,
+  DIAGNOSTIC_MOVE_MISSING_ARG_ERROR,
+  SETTINGS_COMMAND_MISSING_ARG_ERROR,
+  DRIVER_COMMAND_MISSING_ARG_ERROR,
+  INVALID_DRIVER_COMMAND_ARG_ERROR,
+  UNKNOWN_COMMAND_TYPE_ERROR,
+  HOMING_FAILED_LIMIT_SWITCH_ERROR
+};
+
 // Current state of the motor
 MotorState currentMotorState = IDLE;
+// Current error state
+ErrorType currentError = NO_ERROR;
+
+// Function to report errors, set the error state, and print to serial
+void reportError(ErrorType error, const char* message = "") {
+  currentError = error;
+  currentMotorState = ERROR;
+  Serial.print("ERROR:");
+  Serial.print(error);
+  Serial.print(" - ");
+  Serial.println(message);
+}
+}
