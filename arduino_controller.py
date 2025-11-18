@@ -78,6 +78,12 @@ class ArduinoController:
             self.is_moving = abs(delta_deg) > 0.0
             return True
 
+    def send_target_angle(self, f_angle_deg: float) -> bool:
+        """Sends a target angle to the Arduino.
+        This method is added to align with the MotorInterface API.
+        """
+        return self.move_to_abs(f_angle_deg)
+
     def move_to_abs(self, angle_deg: float) -> bool:
         """Move to an absolute stage angle in degrees.
 
@@ -114,7 +120,7 @@ class ArduinoController:
                         tgt = float(parts[1])
                         spd = float(parts[2])
                         run = parts[3].strip() == '1'
-                        ts = int(float(parts[4]))
+                        ts = int(float(parts[4])) # Ensure timestamp is an integer
                         self.current_position = cur
                         self.is_moving = run
                         return Feedback(cur, spd, run, tgt, ts)
